@@ -1,181 +1,1104 @@
 <!DOCTYPE html>
+
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>GBMusicGen ▸ UGE v6</title>
-  <meta name="description" content="AI-powered Game Boy chiptune composer. Generates .uge files for GB Studio." />
+  <title>GBMusicGen ▸ UGE v7</title>
   <meta name="theme-color" content="#0a0a0a" />
-  <meta name="mobile-web-app-capable" content="yes" />
-  <meta name="apple-mobile-web-app-capable" content="yes" />
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <meta name="apple-mobile-web-app-title" content="GBMusicGen" />
-  <link rel="manifest" id="manifest-placeholder" />
-
-  <script>
-    // Inline PWA manifest via blob URL
-    const manifest = {
-      name: "GBMusicGen",
-      short_name: "GBMusicGen",
-      description: "AI Game Boy chiptune composer for GB Studio",
-      start_url: ".",
-      display: "standalone",
-      background_color: "#0a0a0a",
-      theme_color: "#0a0a0a",
-      icons: [
-        {
-          src: "data:image/svg+xml," + encodeURIComponent(`<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'><rect width='192' height='192' fill='%230a0a0a'/><text x='96' y='130' font-size='100' text-anchor='middle' fill='%237bcc5a'>▸</text></svg>`),
-          sizes: "192x192",
-          type: "image/svg+xml"
-        }
-      ]
-    };
-    const manifestBlob = new Blob([JSON.stringify(manifest)], { type: "application/manifest+json" });
-    document.getElementById("manifest-placeholder").href = URL.createObjectURL(manifestBlob);
-  </script>
-
-  <script>
-    if ('serviceWorker' in navigator) {
-      const swCode = `
-        const CACHE = 'gbmusicgen-v1';
-        self.addEventListener('install', e => {
-          e.waitUntil(caches.open(CACHE).then(c => c.add(self.location.pathname)));
-          self.skipWaiting();
-        });
-        self.addEventListener('activate', e => {
-          e.waitUntil(clients.claim());
-        });
-        self.addEventListener('fetch', e => {
-          e.respondWith(
-            caches.match(e.request).then(r => r || fetch(e.request))
-          );
-        });
-      `;
-      const swBlob = new Blob([swCode], { type: 'application/javascript' });
-      const swUrl = URL.createObjectURL(swBlob);
-      navigator.serviceWorker.register(swUrl, { scope: './' }).catch(() => {});
-    }
-  </script>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+
   <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
 
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    html, body { height: 100%; background: #0a0a0a; font-family: 'Courier New', monospace; }
-    body { overflow-x: hidden; color: #e8e0c8; }
+    html, body { height: 100%; background: #080c08; font-family: 'Courier New', monospace; color: #c8d8b8; }
+    ::-webkit-scrollbar { width: 5px; }
+    ::-webkit-scrollbar-track { background: #080c08; }
+    ::-webkit-scrollbar-thumb { background: #2d4020; border-radius: 2px; }
 
-    ::-webkit-scrollbar { width: 6px; }
-    ::-webkit-scrollbar-track { background: #0a0a0a; }
-    ::-webkit-scrollbar-thumb { background: #2a4a20; }
-
-    #install-banner {
-      display: none;
-      position: fixed;
-      bottom: 0; left: 0; right: 0;
-      background: #0d1a0d;
-      border-top: 1px solid #3a4a30;
-      padding: 12px 20px;
-      z-index: 100;
-      font-size: 11px;
-      color: #7bcc5a;
-      letter-spacing: 2px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
+    @keyframes scanline {
+      0% { transform: translateY(-100%); }
+      100% { transform: translateY(100vh); }
     }
-    #install-banner button {
-      background: #7bcc5a;
-      border: none;
-      color: #0a0a0a;
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
+    @keyframes pulse-green { 0%,100%{box-shadow:0 0 4px #3a7a20} 50%{box-shadow:0 0 12px #5aac40,0 0 24px #3a7a2040} }
+    @keyframes slide-in { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
+    @keyframes progress-fill { from{width:0} to{width:var(--target-w)} }
+
+    .scanline-overlay {
+      pointer-events: none;
+      position: fixed; inset: 0; z-index: 9999;
+      background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.03) 2px, rgba(0,0,0,0.03) 4px);
+    }
+
+    .gb-panel {
+      background: #0b110b;
+      border: 1px solid #1e2e1a;
+      border-radius: 2px;
+      position: relative;
+    }
+    .gb-panel::before {
+      content: '';
+      position: absolute; inset: 0;
+      background: linear-gradient(135deg, rgba(100,180,60,0.03) 0%, transparent 60%);
+      pointer-events: none;
+      border-radius: 2px;
+    }
+
+    .gb-input {
+      background: #060e06;
+      border: 1px solid #1e3018;
+      color: #a8c890;
+      font-family: 'Courier New', monospace;
+      font-size: 11px;
+      padding: 5px 8px;
+      width: 100%;
+      outline: none;
+      transition: border-color .15s;
+    }
+    .gb-input:focus { border-color: #4a8c30; }
+    .gb-input option { background: #060e06; }
+
+    .gb-btn {
+      background: linear-gradient(180deg, #2a5a18 0%, #1e4010 100%);
+      border: 1px solid #3a7a25;
+      color: #8acc60;
+      font-family: 'Courier New', monospace;
       font-size: 11px;
       letter-spacing: 2px;
-      padding: 6px 16px;
+      padding: 8px 20px;
       cursor: pointer;
-      font-weight: bold;
+      transition: all .12s;
+      text-transform: uppercase;
     }
-    #install-banner .dismiss {
+    .gb-btn:hover { background: linear-gradient(180deg, #3a7a20 0%, #2a5a14 100%); color: #aae870; }
+    .gb-btn:active { transform: translateY(1px); }
+    .gb-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .gb-btn.primary { animation: pulse-green 2.5s infinite; }
+
+    .gb-btn-secondary {
       background: transparent;
-      border: 1px solid #3a4a30;
-      color: #5a7a50;
+      border: 1px solid #2a4020;
+      color: #5a8a40;
+      font-family: 'Courier New', monospace;
+      font-size: 11px;
+      letter-spacing: 2px;
+      padding: 8px 20px;
+      cursor: pointer;
+      transition: all .12s;
+      text-transform: uppercase;
+    }
+    .gb-btn-secondary:hover { border-color: #4a7030; color: #7aaa58; }
+
+    .chip-tag {
+      display: inline-flex; align-items: center; gap: 5px;
+      background: #0d1a0a; border: 1px solid #253a1a;
+      color: #6a9a50; font-size: 10px; letter-spacing: 1px;
+      padding: 3px 8px; cursor: pointer; transition: all .12s;
+      user-select: none;
+    }
+    .chip-tag.active { background: #162810; border-color: #4a7a28; color: #9acc70; }
+    .chip-tag:hover { border-color: #3a6020; color: #8aba60; }
+
+    .log-line { animation: slide-in .15s ease-out; }
+    .log-line.success { color: #7acc50; }
+    .log-line.error { color: #cc5050; }
+    .log-line.info { color: #5a8aaa; }
+    .log-line.warn { color: #aaaa40; }
+
+    .track-row {
+      display: grid; grid-template-columns: 1fr 1fr auto;
+      gap: 8px; align-items: center;
+      padding: 7px 10px;
+      border-bottom: 1px solid #141a10;
+      transition: background .1s;
+    }
+    .track-row:hover { background: #0d140a; }
+    .track-row:last-child { border-bottom: none; }
+
+    .progress-bar-wrap {
+      height: 3px; background: #111a0d; margin-top: 8px; border-radius: 1px; overflow: hidden;
+    }
+    .progress-bar-fill {
+      height: 100%; background: linear-gradient(90deg, #3a7a20, #7acc40);
+      border-radius: 1px; transition: width .3s ease;
+    }
+
+    label { font-size: 10px; color: #5a7a48; letter-spacing: 1.5px; text-transform: uppercase; display: block; margin-bottom: 4px; }
+
+    .section-header {
+      font-size: 10px; color: #3a5a28; letter-spacing: 3px; text-transform: uppercase;
+      padding: 8px 12px; background: #0a100a; border-bottom: 1px solid #161e12;
+    }
+
+    .motif-grid { display: flex; flex-wrap: wrap; gap: 5px; }
+
+    .waveform-viz {
+      display: flex; align-items: flex-end; gap: 1px; height: 20px;
+    }
+    .waveform-bar {
+      width: 3px; background: #3a7a20; border-radius: 1px 1px 0 0;
+      transition: height .2s ease;
     }
   </style>
+
 </head>
 <body>
+  <div class="scanline-overlay"></div>
   <div id="root"></div>
-
-  <div id="install-banner">
-    <span>▸ INSTALL GBMUSICGEN TO HOME SCREEN</span>
-    <div style="display:flex;gap:8px">
-      <button id="install-btn">INSTALL</button>
-      <button class="dismiss" id="dismiss-btn">✕</button>
-    </div>
-  </div>
-
-  <script>
-    let deferredPrompt = null;
-    const banner = document.getElementById('install-banner');
-    const installBtn = document.getElementById('install-btn');
-    const dismissBtn = document.getElementById('dismiss-btn');
-
-    window.addEventListener('beforeinstallprompt', (e) => {
-      e.preventDefault();
-      deferredPrompt = e;
-      banner.style.display = 'flex';
-    });
-    installBtn.addEventListener('click', async () => {
-      if (!deferredPrompt) return;
-      deferredPrompt.prompt();
-      const { outcome } = await deferredPrompt.userChoice;
-      deferredPrompt = null;
-      banner.style.display = 'none';
-    });
-    dismissBtn.addEventListener('click', () => {
-      banner.style.display = 'none';
-    });
-    window.addEventListener('appinstalled', () => {
-      banner.style.display = 'none';
-      deferredPrompt = null;
-    });
-  </script>
 
   <script type="text/babel">
     const { useState, useEffect, useRef, useCallback } = React;
 
-    const PIXEL_FONT = `'Courier New', 'Lucida Console', monospace`;
-    const TRACK_ROLES = ["Main Theme","Explore","Battle","Rest","Intro Jingle","Game Over","Victory","Boss","Cutscene","Credits"];
+    // ─── UGE FORMAT CONSTANTS ────────────────────────────────────────────────
+    const UGE_VERSION = 6;
+    const DUTY_WAVE = { "12.5%": 0, "25%": 1, "50%": 2, "75%": 3 };
 
+    // GB note table: index 0 = C3, each semitone up
+    // hUGEDriver uses 0=empty, 1=C3 ... 72=B8
+    const NOTE_NAMES = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
+
+    function noteToIndex(name, octave) {
+      // Returns 1-based hUGE note index (1=C3)
+      const base = 3; // C3 = index 1
+      const ni = NOTE_NAMES.indexOf(name);
+      if (ni < 0) return 0;
+      return (octave - base) * 12 + ni + 1;
+    }
+
+    // ─── THEORY ENGINE ────────────────────────────────────────────────────────
+    const SCALES = {
+      "Major":      [0,2,4,5,7,9,11],
+      "Minor":      [0,2,3,5,7,8,10],
+      "Harmonic Minor": [0,2,3,5,7,8,11],
+      "Pentatonic": [0,2,4,7,9],
+      "Dorian":     [0,2,3,5,7,9,10],
+      "Phrygian":   [0,1,3,5,7,8,10],
+      "Lydian":     [0,2,4,6,7,9,11],
+      "Mixolydian": [0,2,4,5,7,9,10],
+      "Diminished": [0,2,3,5,6,8,9,11],
+      "Whole Tone": [0,2,4,6,8,10],
+      "Blues":      [0,3,5,6,7,10],
+    };
+
+    const ROOT_SEMIS = { C:0,"C#":1,D:2,"D#":3,E:4,F:5,"F#":6,G:7,"G#":8,A:9,"A#":10,B:11 };
+
+    // Build scale degrees as note+octave pairs starting from a root/octave
+    function buildScale(root, scaleName, startOctave=4, numOctaves=2) {
+      const rootSemi = ROOT_SEMIS[root] ?? 0;
+      const intervals = SCALES[scaleName] || SCALES["Minor"];
+      const notes = [];
+      for (let oct = startOctave; oct < startOctave + numOctaves; oct++) {
+        for (const interval of intervals) {
+          const semi = rootSemi + interval;
+          const noteSemi = semi % 12;
+          const noteOct = oct + Math.floor(semi / 12);
+          if (noteOct >= 3 && noteOct <= 7) {
+            notes.push({ name: NOTE_NAMES[noteSemi], octave: noteOct });
+          }
+        }
+      }
+      return notes;
+    }
+
+    // ─── GENRE/MOOD PROFILES ─────────────────────────────────────────────────
+    const GENRE_PROFILES = {
+      "RPG": {
+        tempoRange: [90,130], preferredScales: ["Minor","Major","Dorian"],
+        octaves: [4,5], rhythmDensity: 0.6, arpeggiate: true,
+        chordVoicing: "triad", bassMovement: "root-fifth",
+      },
+      "Horror": {
+        tempoRange: [60,90], preferredScales: ["Harmonic Minor","Diminished","Phrygian"],
+        octaves: [3,4], rhythmDensity: 0.35, arpeggiate: false,
+        chordVoicing: "cluster", bassMovement: "chromatic",
+      },
+      "Action": {
+        tempoRange: [140,180], preferredScales: ["Minor","Pentatonic","Blues"],
+        octaves: [4,5], rhythmDensity: 0.85, arpeggiate: true,
+        chordVoicing: "power", bassMovement: "ostinato",
+      },
+      "Puzzle": {
+        tempoRange: [80,110], preferredScales: ["Major","Lydian","Whole Tone"],
+        octaves: [4,5], rhythmDensity: 0.5, arpeggiate: true,
+        chordVoicing: "open", bassMovement: "pedal",
+      },
+      "Adventure": {
+        tempoRange: [100,140], preferredScales: ["Major","Mixolydian","Pentatonic"],
+        octaves: [4,5], rhythmDensity: 0.65, arpeggiate: true,
+        chordVoicing: "triad", bassMovement: "root-fifth",
+      },
+      "Dungeon": {
+        tempoRange: [70,100], preferredScales: ["Harmonic Minor","Phrygian","Diminished"],
+        octaves: [3,4], rhythmDensity: 0.5, arpeggiate: false,
+        chordVoicing: "cluster", bassMovement: "root-fifth",
+      },
+      "Overworld": {
+        tempoRange: [110,150], preferredScales: ["Major","Lydian","Pentatonic"],
+        octaves: [4,5], rhythmDensity: 0.7, arpeggiate: true,
+        chordVoicing: "triad", bassMovement: "walking",
+      },
+      "Boss": {
+        tempoRange: [130,170], preferredScales: ["Minor","Harmonic Minor","Blues"],
+        octaves: [3,5], rhythmDensity: 0.9, arpeggiate: true,
+        chordVoicing: "power", bassMovement: "ostinato",
+      },
+      "Chiptune": {
+        tempoRange: [120,160], preferredScales: ["Major","Minor","Pentatonic"],
+        octaves: [4,5], rhythmDensity: 0.75, arpeggiate: true,
+        chordVoicing: "triad", bassMovement: "root-fifth",
+      },
+    };
+
+    const MOOD_MODIFIERS = {
+      "Eerie":     { densityMod: -0.2, octaveMod: -1, tremolo: true, preferTriton: true },
+      "Heroic":    { densityMod: 0.15, octaveMod: 0, tremolo: false, preferTriton: false },
+      "Melancholy":{ densityMod: -0.1, octaveMod: 0, tremolo: false, preferTriton: false },
+      "Tense":     { densityMod: 0.1, octaveMod: 0, tremolo: true, preferTriton: true },
+      "Joyful":    { densityMod: 0.2, octaveMod: 1, tremolo: false, preferTriton: false },
+      "Mysterious":{ densityMod: -0.15, octaveMod: 0, tremolo: true, preferTriton: true },
+      "Epic":      { densityMod: 0.2, octaveMod: 0, tremolo: false, preferTriton: false },
+      "Calm":      { densityMod: -0.25, octaveMod: 0, tremolo: false, preferTriton: false },
+      "Frantic":   { densityMod: 0.3, octaveMod: 1, tremolo: false, preferTriton: false },
+      "Dark":      { densityMod: 0, octaveMod: -1, tremolo: true, preferTriton: true },
+    };
+
+    // ─── MOTIF LIBRARY ────────────────────────────────────────────────────────
+    // Each motif returns a sequence of scale-degree offsets (into the scale array)
+    const MOTIF_PATTERNS = {
+      "Ascending arpeggio":   () => [0,2,4,7, 4,2,0,2],
+      "Descending arpeggio":  () => [7,4,2,0, 2,4,7,4],
+      "Question phrase":      () => [0,2,4,5, 4,2,4,0],
+      "Answer phrase":        () => [4,5,7,5, 4,2,0,0],
+      "Pedal tone":           (s) => {
+        const p = s[0];
+        return [p,p+2,p,p+4, p,p+3,p,p+1].map(x=>Math.abs(x)%Math.max(1,s.length));
+      },
+      "Stepwise rise":        () => [0,1,2,3, 4,5,6,7],
+      "Stepwise fall":        () => [7,6,5,4, 3,2,1,0],
+      "Leap and fill":        () => [0,5,4,3, 7,6,5,4],
+      "Rhythm ostinato":      () => [0,0,2,0, 0,0,2,0],
+      "Mirror":               () => [0,2,4,2, 4,2,0,2],
+      "Triad bounce":         () => [0,2,4,2, 0,4,2,0],
+      "Trill":                () => [0,1,0,1, 0,1,0,2],
+      "Call and response":    () => [0,2,4,0, 5,4,2,0],
+      "Inversion":            () => [7,5,3,0, 3,5,7,5],
+      "Random walk":          (s) => {
+        const out = [0];
+        for (let i=1;i<8;i++) out.push(Math.max(0,Math.min(s.length-1, out[i-1]+Math.round((Math.random()-0.5)*3))));
+        return out;
+      },
+    };
+
+    // ─── RHYTHM PATTERNS ─────────────────────────────────────────────────────
+    const RHYTHM_PATTERNS = {
+      "Steady 8th":   [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+      "Dotted":       [1,0,0,1,1,0,0,1,1,0,0,1,1,0,0,1],
+      "Syncopated":   [1,0,1,0,0,1,0,1,1,0,1,0,0,1,0,0],
+      "Waltz":        [1,0,0,1,0,0,1,0,0,1,0,0,1,0,0,1],
+      "March":        [1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0],
+      "Swing":        [1,0,0,1,0,0,1,0,0,1,0,0,1,0,0,0],
+      "Sparse":       [1,0,0,0,1,0,0,0,1,0,0,0,1,0,0,0],
+      "Dense":        [1,1,1,0,1,1,1,0,1,1,1,0,1,1,1,0],
+      "Gallop":       [1,1,0,1,1,0,1,1,0,1,1,0,1,1,0,0],
+      "Heartbeat":    [1,0,0,0,0,0,0,0,1,0,1,0,0,0,0,0],
+      "Stutter":      [1,1,0,0,1,1,0,0,0,1,0,1,0,0,1,0],
+    };
+
+    // ─── INSTRUMENT PROFILES ─────────────────────────────────────────────────
+    const ROLE_PROFILES = {
+      "Main Theme":   { duty:"50%", vol:14, envDir:0, envLen:3, octave:5 },
+      "Explore":      { duty:"25%", vol:12, envDir:0, envLen:2, octave:4 },
+      "Battle":       { duty:"50%", vol:15, envDir:0, envLen:1, octave:5 },
+      "Rest":         { duty:"12.5%", vol:10, envDir:0, envLen:3, octave:4 },
+      "Intro Jingle": { duty:"25%", vol:13, envDir:0, envLen:2, octave:5 },
+      "Game Over":    { duty:"12.5%", vol:11, envDir:1, envLen:4, octave:4 },
+      "Victory":      { duty:"50%", vol:15, envDir:0, envLen:2, octave:5 },
+      "Boss":         { duty:"75%", vol:15, envDir:0, envLen:1, octave:4 },
+      "Cutscene":     { duty:"25%", vol:12, envDir:0, envLen:3, octave:4 },
+      "Credits":      { duty:"12.5%", vol:10, envDir:0, envLen:4, octave:4 },
+    };
+
+    // ─── RNG SEEDED ───────────────────────────────────────────────────────────
+    function mulberry32(seed) {
+      return function() {
+        seed |= 0; seed = seed + 0x6D2B79F5 | 0;
+        let t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+        t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+        return ((t ^ t >>> 14) >>> 0) / 4294967296;
+      };
+    }
+
+    // ─── PATTERN GENERATOR ────────────────────────────────────────────────────
+    // Returns 64 rows: [{note:int, vol:int, effect:int, param:int}]
+    // note=0 means empty, note=1..72 = C3..B8
+    function generatePattern(opts) {
+      const {
+        scale, genre, mood, role, motifName, rhythmName, seed,
+        numRows = 64, octaveOverride,
+      } = opts;
+
+      const rng = mulberry32(seed ?? Math.random() * 0xFFFFFF | 0);
+      const gp = GENRE_PROFILES[genre] || GENRE_PROFILES["RPG"];
+      const mm = MOOD_MODIFIERS[mood] || {};
+      const rp = ROLE_PROFILES[role] || ROLE_PROFILES["Main Theme"];
+
+      const baseOctave = octaveOverride ?? (gp.octaves[0] + (mm.octaveMod ?? 0));
+      const scaleNotes = buildScale(scale.root, scale.name, Math.max(3, baseOctave), 3);
+
+      if (scaleNotes.length === 0) {
+        return Array(numRows).fill(null).map(() => ({ note:0, vol:0, effect:0, param:0 }));
+      }
+
+      // Get motif degree sequence
+      const motifFn = MOTIF_PATTERNS[motifName] || MOTIF_PATTERNS["Ascending arpeggio"];
+      const rawDegrees = motifFn(Array.from({length:scaleNotes.length},(_,i)=>i));
+      const degrees = rawDegrees.map(d => Math.abs(Math.round(d)) % scaleNotes.length);
+
+      // Rhythm mask
+      const rhythmMask = RHYTHM_PATTERNS[rhythmName] || RHYTHM_PATTERNS["Steady 8th"];
+
+      // Density
+      let density = (gp.rhythmDensity ?? 0.6) + (mm.densityMod ?? 0);
+      density = Math.max(0.1, Math.min(1, density));
+
+      const rows = [];
+      let phrasePos = 0;
+      let motifPhrase = [...degrees];
+
+      for (let r = 0; r < numRows; r++) {
+        const inRhythm = rhythmMask[r % rhythmMask.length] === 1;
+        const denseRoll = rng() < density;
+
+        if (!inRhythm || !denseRoll) {
+          rows.push({ note:0, vol:0, effect:0, param:0 });
+          phrasePos++;
+          continue;
+        }
+
+        // Pick note from motif
+        const degIdx = motifPhrase[phrasePos % motifPhrase.length];
+        const noteObj = scaleNotes[degIdx % scaleNotes.length];
+        const noteIdx = noteToIndex(noteObj.name, noteObj.octave);
+
+        // Volume with envelope simulation
+        const baseVol = rp.vol;
+        const vol = Math.max(1, Math.min(15, baseVol - Math.floor(rng() * 2)));
+
+        // Effects
+        let effect = 0, param = 0;
+
+        // Tremolo for eerie/tense moods
+        if (mm.tremolo && rng() < 0.2) {
+          effect = 4; // vibrato-like: use arpeggio effect
+          param = 0x03;
+        }
+
+        // Occasional pitch slide
+        if (rng() < 0.08) {
+          effect = 1; // portamento up
+          param = Math.floor(rng() * 4) + 1;
+        }
+
+        // Phrase reset
+        phrasePos++;
+        if (phrasePos >= motifPhrase.length) {
+          phrasePos = 0;
+          // Variation: occasionally invert or shift motif
+          if (rng() < 0.3) {
+            motifPhrase = [...degrees].reverse();
+          } else if (rng() < 0.2) {
+            const shift = Math.floor(rng() * 4);
+            motifPhrase = [...degrees.slice(shift), ...degrees.slice(0, shift)];
+          } else {
+            motifPhrase = [...degrees];
+          }
+        }
+
+        rows.push({ note: noteIdx, vol, effect, param });
+      }
+
+      return rows;
+    }
+
+    // Generate noise/drum pattern
+    function generateNoisePattern(genre, mood, rhythmName, seed, numRows=64) {
+      const rng = mulberry32(seed);
+      const gp = GENRE_PROFILES[genre] || GENRE_PROFILES["RPG"];
+      const mm = MOOD_MODIFIERS[mood] || {};
+      const rhythmMask = RHYTHM_PATTERNS[rhythmName] || RHYTHM_PATTERNS["March"];
+
+      let density = (gp.rhythmDensity ?? 0.6) + (mm.densityMod ?? 0);
+      density = Math.max(0.1, Math.min(1, density));
+
+      const rows = [];
+      for (let r = 0; r < numRows; r++) {
+        const inRhythm = rhythmMask[r % rhythmMask.length] === 1;
+        if (inRhythm && rng() < density * 0.7) {
+          // noise: note encodes period register bits
+          // hUGE noise note: 0x10-0x7F range maps to different noise pitches
+          const noisePitch = [0x20, 0x30, 0x40, 0x50, 0x60, 0x70];
+          const np = noisePitch[Math.floor(rng() * noisePitch.length)];
+          rows.push({ note: np, vol: Math.floor(rng()*4)+9, effect:0, param:0 });
+        } else {
+          rows.push({ note:0, vol:0, effect:0, param:0 });
+        }
+      }
+      return rows;
+    }
+
+    // ─── UGE BINARY WRITER ────────────────────────────────────────────────────
+    // Implements hUGEDriver UGE v6 format
+    // Ref: https://github.com/SuperDisk/hUGEDriver/blob/master/include/uge.inc
+
+    class UGEWriter {
+      constructor() {
+        this.buf = [];
+      }
+
+      u8(v) { this.buf.push(v & 0xFF); }
+      u16le(v) { this.u8(v & 0xFF); this.u8((v >> 8) & 0xFF); }
+      u32le(v) { this.u16le(v & 0xFFFF); this.u16le((v >> 16) & 0xFFFF); }
+
+      strN(s, n) {
+        const enc = new TextEncoder().encode(s.slice(0, n));
+        for (let i = 0; i < n; i++) this.u8(i < enc.length ? enc[i] : 0);
+      }
+
+      // Write instrument (pulse)
+      writePulseInstrument(duty, vol, envDir, envLen, sweepTime=0, sweepDir=0, sweepShift=0) {
+        this.u8(duty & 3);       // duty
+        this.u8(vol & 0xF);      // initial volume
+        this.u8(envDir & 1);     // envelope direction (0=decrease, 1=increase)
+        this.u8(envLen & 7);     // envelope length
+        this.u8(sweepTime & 7);  // sweep time (ch1 only)
+        this.u8(sweepDir & 1);   // sweep direction
+        this.u8(sweepShift & 7); // sweep shift
+      }
+
+      // Write wave instrument
+      writeWaveInstrument(vol, waveId) {
+        this.u8(vol & 3);   // volume (0=mute,1=100%,2=50%,3=25%)
+        this.u8(waveId & 0xF); // wave table id
+      }
+
+      // Write noise instrument
+      writeNoiseInstrument(vol, envDir, envLen, step) {
+        this.u8(vol & 0xF);
+        this.u8(envDir & 1);
+        this.u8(envLen & 7);
+        this.u8(step & 1); // step (0=15bit, 1=7bit)
+      }
+
+      // Write a 64-row pattern for a single channel
+      // rows: [{note, vol, effect, param}]
+      writePattern(rows) {
+        for (let r = 0; r < 64; r++) {
+          const row = rows[r] || { note:0, vol:0, effect:0, param:0 };
+          this.u8(row.note & 0xFF);   // note (0=empty)
+          this.u8(row.vol & 0xFF);    // volume (0=no change, 0x10-0xFF = set)
+          this.u8(row.effect & 0xFF); // effect type
+          this.u8(row.param & 0xFF);  // effect param
+        }
+      }
+
+      // Write song order (list of pattern indices, max 256)
+      writeOrder(patternIds) {
+        this.u8(patternIds.length & 0xFF);
+        for (const id of patternIds) this.u8(id & 0xFF);
+        // pad to 256
+        for (let i = patternIds.length; i < 256; i++) this.u8(0);
+      }
+
+      toUint8Array() {
+        return new Uint8Array(this.buf);
+      }
+    }
+
+    // Build complete UGE file for one track
+    function buildUGE(trackDef, globalOpts) {
+      const { name, role, motif, rhythm, seed } = trackDef;
+      const { genre, mood, key, scale: scaleName, tempo } = globalOpts;
+
+      const w = new UGEWriter();
+
+      // Header
+      w.u32le(UGE_VERSION);   // version
+      w.strN(name, 64);       // song name
+      w.strN("GBMusicGen", 64); // artist
+      w.u8(tempo & 0xFF);     // tempo (roughly)
+      w.u8(8);                // ticks per row
+
+      // ── Instruments ──────────────────────────────────────────
+      // 15 pulse instruments
+      const rp = ROLE_PROFILES[role] || ROLE_PROFILES["Main Theme"];
+      const dutyBit = DUTY_WAVE[rp.duty] ?? 2;
+
+      for (let i = 0; i < 15; i++) {
+        w.writePulseInstrument(
+          i === 0 ? dutyBit : (dutyBit + i) % 4,
+          Math.max(1, rp.vol - i),
+          rp.envDir,
+          (rp.envLen + i) % 8
+        );
+      }
+
+      // 15 wave instruments
+      for (let i = 0; i < 15; i++) {
+        w.writeWaveInstrument(i < 5 ? 1 : i < 10 ? 2 : 3, i % 16);
+      }
+
+      // 15 noise instruments
+      for (let i = 0; i < 15; i++) {
+        w.writeNoiseInstrument(Math.max(4, rp.vol - i*2), rp.envDir, rp.envLen, i % 2);
+      }
+
+      // ── Wave table (16 waves × 32 bytes each) ─────────────────
+      // wave 0: sawtooth
+      for (let s = 0; s < 32; s++) w.u8(s < 16 ? s : 31 - s);
+      // wave 1: square
+      for (let s = 0; s < 32; s++) w.u8(s < 16 ? 15 : 0);
+      // wave 2: sine (approx)
+      for (let s = 0; s < 32; s++) w.u8(Math.round(7.5 + 7.5 * Math.sin(2*Math.PI*s/32)));
+      // waves 3-15: variations
+      for (let w2 = 3; w2 < 16; w2++) {
+        for (let s = 0; s < 32; s++) {
+          w.u8(Math.round(7.5 + 7.5 * Math.sin(2*Math.PI*s/32 * (w2%4+1))) & 0xF);
+        }
+      }
+
+      // ── Patterns ─────────────────────────────────────────────
+      // We generate 16 patterns (4 channels × 4 phrases)
+      const scaleObj = { root: key, name: scaleName };
+      const numPatterns = 16; // 4 per channel
+
+      const allPatterns = [];
+      for (let p = 0; p < numPatterns; p++) {
+        const ch = p % 4; // channel 0=pulse1, 1=pulse2, 2=wave, 3=noise
+        const phrase = Math.floor(p / 4);
+        const patSeed = (seed ^ (p * 0x9e3779b9)) | 0;
+
+        let rows;
+        if (ch === 3) {
+          // Noise channel
+          rows = generateNoisePattern(genre, mood, rhythm, patSeed);
+        } else {
+          // Melodic channel
+          const octOffset = ch === 2 ? -1 : ch === 1 ? 0 : 0;
+          rows = generatePattern({
+            scale: scaleObj, genre, mood, role, motifName: motif,
+            rhythmName: rhythm, seed: patSeed, octaveOverride: null,
+          });
+          // Ch2 (wave) plays an octave lower
+          if (ch === 2) {
+            rows = rows.map(r => ({
+              ...r,
+              note: r.note > 12 ? r.note - 12 : r.note
+            }));
+          }
+          // Ch1 (pulse2) plays harmony (offset by 2 scale degrees)
+          if (ch === 1) {
+            rows = rows.map(r => ({
+              ...r,
+              note: r.note > 0 ? Math.max(1, r.note - 4) : 0
+            }));
+          }
+        }
+
+        // Write 256-byte pattern (4 bytes × 64 rows)
+        allPatterns.push(rows);
+        w.writePattern(rows);
+      }
+
+      // ── Song Orders (one per channel) ─────────────────────────
+      // Each channel gets 4 patterns in order
+      for (let ch = 0; ch < 4; ch++) {
+        const order = [ch*4, ch*4+1, ch*4+2, ch*4+3];
+        w.writeOrder(order);
+      }
+
+      // ── Routines (not used, write 0 bytes) ────────────────────
+      w.u8(0); // no routines
+
+      return w.toUint8Array();
+    }
+
+    // ─── MINIZIP (pure JS, no deps) ───────────────────────────────────────────
+    // Implements a minimal ZIP file writer (stored, no compression)
+    function buildZip(files) {
+      // files: [{name: string, data: Uint8Array}]
+      const parts = [];
+      const centralDir = [];
+      let offset = 0;
+
+      function u16(v) { return [v & 0xFF, (v >> 8) & 0xFF]; }
+      function u32(v) { return [v & 0xFF, (v>>8)&0xFF, (v>>16)&0xFF, (v>>24)&0xFF]; }
+
+      function crc32(data) {
+        let crc = 0xFFFFFFFF;
+        for (let i = 0; i < data.length; i++) {
+          let b = (crc ^ data[i]) & 0xFF;
+          for (let j = 0; j < 8; j++) {
+            b = (b & 1) ? (b >>> 1) ^ 0xEDB88320 : (b >>> 1);
+          }
+          crc = (crc >>> 8) ^ b;
+        }
+        return (crc ^ 0xFFFFFFFF) >>> 0;
+      }
+
+      for (const file of files) {
+        const nameBytes = new TextEncoder().encode(file.name);
+        const dataBytes = file.data;
+        const crc = crc32(dataBytes);
+        const size = dataBytes.length;
+
+        // Local file header
+        const localHeader = [
+          0x50,0x4B,0x03,0x04, // signature
+          20,0,                 // version needed
+          0,0,                  // flags
+          0,0,                  // compression (stored)
+          0,0,                  // mod time
+          0,0,                  // mod date
+          ...u32(crc),
+          ...u32(size),
+          ...u32(size),
+          ...u16(nameBytes.length),
+          0,0,                  // extra field length
+          ...nameBytes,
+        ];
+
+        const centralEntry = [
+          0x50,0x4B,0x01,0x02, // signature
+          20,0,                 // version made by
+          20,0,                 // version needed
+          0,0,                  // flags
+          0,0,                  // compression
+          0,0,                  // mod time
+          0,0,                  // mod date
+          ...u32(crc),
+          ...u32(size),
+          ...u32(size),
+          ...u16(nameBytes.length),
+          0,0,                  // extra field length
+          0,0,                  // file comment length
+          0,0,                  // disk start
+          0,0,                  // internal attr
+          0,0,0,0,              // external attr
+          ...u32(offset),       // local header offset
+          ...nameBytes,
+        ];
+
+        parts.push(...localHeader, ...dataBytes);
+        centralDir.push(...centralEntry);
+        offset += localHeader.length + size;
+      }
+
+      const centralOffset = offset;
+      const centralSize = centralDir.length;
+      const numFiles = files.length;
+
+      const eocd = [
+        0x50,0x4B,0x05,0x06,
+        0,0,             // disk number
+        0,0,             // disk with CD
+        ...u16(numFiles),
+        ...u16(numFiles),
+        ...u32(centralSize),
+        ...u32(centralOffset),
+        0,0,             // comment length
+      ];
+
+      return new Uint8Array([...parts, ...centralDir, ...eocd]);
+    }
+
+    // ─── UI CONSTANTS ─────────────────────────────────────────────────────────
+    const GENRES = Object.keys(GENRE_PROFILES);
+    const MOODS = Object.keys(MOOD_MODIFIERS);
+    const KEYS = Object.keys(ROOT_SEMIS);
+    const SCALE_NAMES = Object.keys(SCALES);
+    const MOTIF_NAMES = Object.keys(MOTIF_PATTERNS);
+    const RHYTHM_NAMES = Object.keys(RHYTHM_PATTERNS);
+    const TRACK_ROLES = Object.keys(ROLE_PROFILES);
+
+    const DEFAULT_FORM = {
+      genre: "RPG",
+      mood: "Heroic",
+      key: "C",
+      scale: "Minor",
+      tempo: 120,
+      motifs: ["Ascending arpeggio", "Triad bounce"],
+      rhythms: ["March", "Dotted"],
+      tracks: [
+        { name: "Main Theme", role: "Main Theme" },
+        { name: "Battle", role: "Battle" },
+        { name: "Explore", role: "Explore" },
+      ],
+    };
+
+    // ─── APP ──────────────────────────────────────────────────────────────────
     function App() {
-      const [form, setForm] = useState({ genre: "Horror", mood: "Eerie", key: "A", scale: "Minor", tempo:120, trackCount:3, tracks:[{name:"Main Theme", role:"Main Theme"},{name:"Explore", role:"Explore"},{name:"Game Over", role:"Game Over"}], motifs:["Descending arpeggio","Pedal tone"], textures:["Sparse","Driving beat"] });
-      const [log, setLog] = useState(["▶ Ready. Configure your soundtrack and press GENERATE."]);
+      const [form, setForm] = useState(DEFAULT_FORM);
+      const [log, setLog] = useState([{ text:"▶ Ready. Configure your soundtrack and press GENERATE.", type:"info" }]);
+      const [generating, setGenerating] = useState(false);
+      const [progress, setProgress] = useState(0);
       const [zipData, setZipData] = useState(null);
+      const [activeTab, setActiveTab] = useState("config");
+      const [vizBars, setVizBars] = useState(Array(24).fill(4));
       const logRef = useRef(null);
 
-      const addLog = (msg) => setLog(prev => [...prev.slice(-40), msg]);
-      useEffect(() => { if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight; }, [log]);
+      const addLog = useCallback((text, type="default") => {
+        setLog(prev => [...prev.slice(-60), { text, type }]);
+      }, []);
+
+      useEffect(() => {
+        if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
+      }, [log]);
+
+      // Animated viz
+      useEffect(() => {
+        if (!generating) { setVizBars(Array(24).fill(2)); return; }
+        const id = setInterval(() => {
+          setVizBars(Array(24).fill(0).map(() => Math.floor(Math.random()*16)+2));
+        }, 80);
+        return () => clearInterval(id);
+      }, [generating]);
+
+      const updateField = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+      const toggleMotif = (m) => {
+        setForm(f => ({
+          ...f,
+          motifs: f.motifs.includes(m) ? f.motifs.filter(x=>x!==m) : [...f.motifs, m]
+        }));
+      };
+
+      const toggleRhythm = (r) => {
+        setForm(f => ({
+          ...f,
+          rhythms: f.rhythms.includes(r) ? f.rhythms.filter(x=>x!==r) : [...f.rhythms, r]
+        }));
+      };
+
+      const updateTrack = (i, k, v) => {
+        setForm(f => {
+          const tracks = [...f.tracks];
+          tracks[i] = { ...tracks[i], [k]: v };
+          return { ...f, tracks };
+        });
+      };
+
+      const addTrack = () => {
+        if (form.tracks.length >= 10) return;
+        const remaining = TRACK_ROLES.filter(r => !form.tracks.find(t=>t.role===r));
+        const role = remaining[0] || "Main Theme";
+        setForm(f => ({ ...f, tracks: [...f.tracks, { name: role, role }] }));
+      };
+
+      const removeTrack = (i) => {
+        setForm(f => ({ ...f, tracks: f.tracks.filter((_,idx)=>idx!==i) }));
+      };
+
+      const generate = async () => {
+        if (generating) return;
+        setGenerating(true);
+        setZipData(null);
+        setProgress(0);
+        addLog("▶ Starting generation...", "info");
+        addLog(`  Genre: ${form.genre}  Mood: ${form.mood}  Key: ${form.key} ${form.scale}  Tempo: ${form.tempo}`, "info");
+        addLog(`  Motifs: ${form.motifs.join(", ") || "none"}`, "info");
+        addLog(`  Rhythms: ${form.rhythms.join(", ") || "none"}`, "info");
+
+        await new Promise(r => setTimeout(r, 40));
+
+        const files = [];
+        const gp = GENRE_PROFILES[form.genre];
+        if (!gp) { addLog("✗ Unknown genre", "error"); setGenerating(false); return; }
+
+        for (let i = 0; i < form.tracks.length; i++) {
+          const track = form.tracks[i];
+          setProgress(Math.round((i / form.tracks.length) * 90));
+          addLog(`  [${i+1}/${form.tracks.length}] Composing: ${track.name} (${track.role})`, "default");
+
+          await new Promise(r => setTimeout(r, 30));
+
+          const motif = form.motifs.length > 0
+            ? form.motifs[i % form.motifs.length]
+            : "Ascending arpeggio";
+          const rhythm = form.rhythms.length > 0
+            ? form.rhythms[i % form.rhythms.length]
+            : "March";
+
+          const seed = Math.floor(
+            (i+1) * 0x7B5A49CF ^
+            (form.key.charCodeAt(0) * 0x1234) ^
+            (form.tempo * 0x5678)
+          );
+
+          try {
+            const ugeData = buildUGE(
+              { name: track.name, role: track.role, motif, rhythm, seed },
+              { genre: form.genre, mood: form.mood, key: form.key, scale: form.scale, tempo: form.tempo }
+            );
+
+            const safeName = track.name.replace(/[^a-zA-Z0-9_-]/g, "_");
+            files.push({ name: `${safeName}.uge`, data: ugeData });
+            addLog(`  ✓ ${track.name}.uge  [${ugeData.length} bytes]  motif:${motif}  rhythm:${rhythm}`, "success");
+          } catch (e) {
+            addLog(`  ✗ Failed: ${track.name}: ${e.message}`, "error");
+          }
+        }
+
+        setProgress(95);
+        addLog("▶ Packaging ZIP...", "info");
+        await new Promise(r => setTimeout(r, 30));
+
+        const zip = buildZip(files);
+        setZipData(zip);
+        setProgress(100);
+        addLog(`✓ Done! ${files.length} track(s) packaged → gbmusic_${form.genre.toLowerCase()}.zip`, "success");
+        addLog(`  Import .uge files into GB Studio music folder.`, "info");
+        setGenerating(false);
+      };
+
+      const download = () => {
+        if (!zipData) return;
+        const blob = new Blob([zipData], { type: "application/zip" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `gbmusic_${form.genre.toLowerCase()}_${form.key}${form.scale.replace(/\s/g,"")}.zip`;
+        a.click();
+        URL.revokeObjectURL(url);
+      };
+
+      const applyGenreDefaults = (genre) => {
+        const gp = GENRE_PROFILES[genre];
+        if (!gp) return;
+        const sc = gp.preferredScales[0];
+        setForm(f => ({
+          ...f,
+          genre,
+          scale: sc,
+          tempo: Math.round((gp.tempoRange[0] + gp.tempoRange[1]) / 2),
+        }));
+        addLog(`▶ Applied defaults for genre: ${genre} (scale: ${sc}, tempo: ${Math.round((gp.tempoRange[0]+gp.tempoRange[1])/2)})`, "info");
+      };
 
       return (
-        <div style={{ background: "#0a0a0a", minHeight:"100vh", fontFamily:PIXEL_FONT, paddingBottom:"60px" }}>
-          <div style={{ padding:"28px 32px 20px", borderBottom:"2px solid #3a3a2a", background:"linear-gradient(180deg, #0d1a0d 0%, #0a0a0a 100%)" }}>
-            <h1 style={{ fontSize:"28px", color:"#7bcc5a", margin:0 }}>GBMusicGen ▸ UGE v6</h1>
-            <span style={{ fontSize:"11px", color:"#5a7a50" }}>AI-powered chiptune composer for GB Studio</span>
+        <div style={{ background:"#080c08", minHeight:"100vh", fontFamily:"'Courier New',monospace", paddingBottom:"40px" }}>
+
+          {/* Header */}
+          <div style={{ padding:"20px 24px 16px", borderBottom:"1px solid #1a2614", background:"linear-gradient(180deg,#0c150c 0%,#080c08 100%)", display:"flex", alignItems:"center", justifyContent:"space-between", flexWrap:"wrap", gap:8 }}>
+            <div>
+              <div style={{ fontSize:"20px", color:"#7acc50", letterSpacing:"2px", fontWeight:"bold" }}>
+                GBMUSICGEN <span style={{ color:"#3a6a28" }}>▸</span> UGE v7
+              </div>
+              <div style={{ fontSize:"10px", color:"#3a5a28", letterSpacing:"3px", marginTop:2 }}>
+                MOTIF-AWARE CHIPTUNE COMPOSER FOR GB STUDIO
+              </div>
+            </div>
+            {/* Waveform viz */}
+            <div className="waveform-viz">
+              {vizBars.map((h,i) => (
+                <div key={i} className="waveform-bar" style={{ height:`${h}px` }} />
+              ))}
+            </div>
           </div>
 
-          <div style={{ padding:"28px 32px" }}>
-            <button onClick={() => alert("Generate logic not included in this snippet")} style={{ padding:"8px 16px", background:"#7bcc5a", border:"none", color:"#0a0a0a", cursor:"pointer" }}>GENERATE</button>
-            {zipData && <button onClick={() => {
-              const blob = new Blob([zipData], {type:"application/zip"});
-              const url = URL.createObjectURL(blob);
-              const a = document.createElement("a");
-              a.href = url;
-              a.download = "gbmusic.zip";
-              a.click();
-              URL.revokeObjectURL(url);
-            }} style={{ padding:"8px 16px", marginLeft:"12px", background:"#7bcc5a", border:"none", color:"#0a0a0a", cursor:"pointer" }}>DOWNLOAD ZIP</button>}
-            <div ref={logRef} style={{ marginTop:"16px", maxHeight:"300px", overflowY:"auto", background:"#0d1a0d", padding:"12px", border:"1px solid #3a4a30", fontSize:"11px" }}>
-              {log.map((l,i) => <div key={i}>{l}</div>)}
+          {/* Tab bar */}
+          <div style={{ display:"flex", borderBottom:"1px solid #1a2614", background:"#090e09" }}>
+            {["config","tracks","motifs","log"].map(tab => (
+              <button key={tab} onClick={() => setActiveTab(tab)} style={{
+                background: activeTab===tab ? "#0c160c" : "transparent",
+                border: "none", borderBottom: activeTab===tab ? "2px solid #5aac38" : "2px solid transparent",
+                color: activeTab===tab ? "#8acc60" : "#3a5a28",
+                fontFamily:"'Courier New',monospace", fontSize:"10px", letterSpacing:"2px",
+                padding:"10px 18px", cursor:"pointer", textTransform:"uppercase",
+                transition:"all .12s"
+              }}>{tab}</button>
+            ))}
+          </div>
+
+          {/* Content */}
+          <div style={{ padding:"20px 24px", maxWidth:880, margin:"0 auto" }}>
+
+            {/* ── CONFIG TAB ── */}
+            {activeTab === "config" && (
+              <div style={{ display:"flex", flexDirection:"column", gap:16 }}>
+                <div className="gb-panel" style={{ padding:0 }}>
+                  <div className="section-header">▸ GLOBAL SETTINGS</div>
+                  <div style={{ padding:"14px", display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(160px,1fr))", gap:12 }}>
+                    <div>
+                      <label>Genre</label>
+                      <select className="gb-input" value={form.genre} onChange={e=>applyGenreDefaults(e.target.value)}>
+                        {GENRES.map(g=><option key={g}>{g}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label>Mood</label>
+                      <select className="gb-input" value={form.mood} onChange={e=>updateField("mood",e.target.value)}>
+                        {MOODS.map(m=><option key={m}>{m}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label>Key</label>
+                      <select className="gb-input" value={form.key} onChange={e=>updateField("key",e.target.value)}>
+                        {KEYS.map(k=><option key={k}>{k}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label>Scale</label>
+                      <select className="gb-input" value={form.scale} onChange={e=>updateField("scale",e.target.value)}>
+                        {SCALE_NAMES.map(s=><option key={s}>{s}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label>Tempo (BPM)</label>
+                      <input type="number" className="gb-input" min={60} max={240} value={form.tempo}
+                        onChange={e=>updateField("tempo",parseInt(e.target.value)||120)} />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Genre info */}
+                {GENRE_PROFILES[form.genre] && (() => {
+                  const gp = GENRE_PROFILES[form.genre];
+                  const mm = MOOD_MODIFIERS[form.mood] || {};
+                  return (
+                    <div className="gb-panel" style={{ padding:"12px 14px" }}>
+                      <div style={{ fontSize:"10px", color:"#3a6020", letterSpacing:"1px", marginBottom:6 }}>▸ PROFILE ANALYSIS</div>
+                      <div style={{ display:"flex", flexWrap:"wrap", gap:"8px 24px", fontSize:"10px", color:"#5a8040" }}>
+                        <span>TEMPO RANGE: {gp.tempoRange[0]}–{gp.tempoRange[1]}</span>
+                        <span>DENSITY: {Math.max(0,Math.min(1,(gp.rhythmDensity+(mm.densityMod||0)))).toFixed(2)}</span>
+                        <span>BASS: {gp.bassMovement}</span>
+                        <span>OCTAVES: {gp.octaves.join(",")}{mm.octaveMod ? ` + ${mm.octaveMod}` : ""}</span>
+                        {mm.tremolo && <span>TREMOLO: ON</span>}
+                        {mm.preferTriton && <span>TRITONE: ACTIVE</span>}
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
+            )}
+
+            {/* ── TRACKS TAB ── */}
+            {activeTab === "tracks" && (
+              <div className="gb-panel" style={{ padding:0 }}>
+                <div className="section-header" style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                  <span>▸ TRACKS ({form.tracks.length}/10)</span>
+                  <button className="gb-btn-secondary" style={{ padding:"3px 12px", fontSize:"10px" }} onClick={addTrack}
+                    disabled={form.tracks.length >= 10}>+ ADD</button>
+                </div>
+                {form.tracks.map((t,i) => (
+                  <div key={i} className="track-row">
+                    <input className="gb-input" value={t.name} onChange={e=>updateTrack(i,"name",e.target.value)} placeholder="Track name" />
+                    <select className="gb-input" value={t.role} onChange={e=>updateTrack(i,"role",e.target.value)}>
+                      {TRACK_ROLES.map(r=><option key={r}>{r}</option>)}
+                    </select>
+                    <button onClick={()=>removeTrack(i)} style={{
+                      background:"transparent", border:"1px solid #2a1a1a", color:"#6a3a30",
+                      fontFamily:"monospace", fontSize:"11px", padding:"4px 8px", cursor:"pointer"
+                    }}>✕</button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* ── MOTIFS TAB ── */}
+            {activeTab === "motifs" && (
+              <div style={{ display:"flex", flexDirection:"column", gap:16 }}>
+                <div className="gb-panel" style={{ padding:0 }}>
+                  <div className="section-header">▸ MOTIF SELECTION (select multiple to rotate)</div>
+                  <div style={{ padding:14 }}>
+                    <div className="motif-grid">
+                      {MOTIF_NAMES.map(m => (
+                        <div key={m} className={`chip-tag${form.motifs.includes(m)?" active":""}`} onClick={()=>toggleMotif(m)}>
+                          {form.motifs.includes(m) ? "●" : "○"} {m}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="gb-panel" style={{ padding:0 }}>
+                  <div className="section-header">▸ RHYTHM PATTERNS (select multiple to rotate)</div>
+                  <div style={{ padding:14 }}>
+                    <div className="motif-grid">
+                      {RHYTHM_NAMES.map(r => (
+                        <div key={r} className={`chip-tag${form.rhythms.includes(r)?" active":""}`} onClick={()=>toggleRhythm(r)}>
+                          {form.rhythms.includes(r) ? "●" : "○"} {r}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="gb-panel" style={{ padding:"12px 14px" }}>
+                  <div style={{ fontSize:"10px", color:"#3a6020", letterSpacing:"1px", marginBottom:8 }}>▸ MOTIF ASSIGNMENT PREVIEW</div>
+                  {form.tracks.map((t,i) => {
+                    const motif = form.motifs.length > 0 ? form.motifs[i % form.motifs.length] : "—";
+                    const rhythm = form.rhythms.length > 0 ? form.rhythms[i % form.rhythms.length] : "—";
+                    return (
+                      <div key={i} style={{ fontSize:"10px", color:"#4a7838", padding:"3px 0", borderBottom:"1px solid #0f1a0c" }}>
+                        <span style={{ color:"#6aaa50", width:160, display:"inline-block" }}>{t.name}</span>
+                        <span style={{ color:"#3a5a28" }}>motif:</span> <span style={{ color:"#8acc60" }}>{motif}</span>
+                        {"  "}<span style={{ color:"#3a5a28" }}>rhythm:</span> <span style={{ color:"#8acc60" }}>{rhythm}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* ── LOG TAB ── */}
+            {activeTab === "log" && (
+              <div className="gb-panel" style={{ padding:0 }}>
+                <div className="section-header">▸ GENERATION LOG</div>
+                <div ref={logRef} style={{ padding:"10px 12px", maxHeight:"340px", overflowY:"auto", fontSize:"10px", letterSpacing:"0.5px", lineHeight:"1.7" }}>
+                  {log.map((l,i) => (
+                    <div key={i} className={`log-line ${l.type}`}>{l.text}</div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* ── GENERATE BAR ── */}
+            <div style={{ marginTop:20, display:"flex", gap:10, alignItems:"center", flexWrap:"wrap" }}>
+              <button className={`gb-btn${!generating?" primary":""}`} disabled={generating} onClick={generate}>
+                {generating ? "◌ GENERATING..." : "▸ GENERATE"}
+              </button>
+              {zipData && (
+                <button className="gb-btn" onClick={download} style={{ animation:"pulse-green 2s infinite" }}>
+                  ⬇ DOWNLOAD ZIP
+                </button>
+              )}
+              {form.tracks.length === 0 && (
+                <span style={{ fontSize:"10px", color:"#6a3a20" }}>▸ Add at least one track</span>
+              )}
+            </div>
+
+            {/* Progress bar */}
+            {(generating || progress > 0) && (
+              <div className="progress-bar-wrap" style={{ marginTop:10 }}>
+                <div className="progress-bar-fill" style={{ width:`${progress}%` }} />
+              </div>
+            )}
+
+            {/* Quick-reference */}
+            <div className="gb-panel" style={{ padding:"10px 14px", marginTop:20 }}>
+              <div style={{ fontSize:"10px", color:"#2a4a20", letterSpacing:"2px", marginBottom:6 }}>▸ QUICK REFERENCE</div>
+              <div style={{ fontSize:"10px", color:"#3a5a2a", lineHeight:1.8 }}>
+                Each .uge contains 4 channels: Pulse1 (melody) · Pulse2 (harmony) · Wave (bass/pad) · Noise (drums)<br/>
+                16 patterns generated per file (4 per channel). Import into GB Studio → Assets → Music.<br/>
+                Genre sets: scale preference, tempo range, rhythm density, octave range, bass movement.<br/>
+                Mood modifies: density ± · octave ± · tremolo · tritone usage.<br/>
+                Motifs generate melodic shapes; rhythms control note placement timing.
+              </div>
             </div>
           </div>
         </div>
@@ -184,5 +1107,6 @@
 
     ReactDOM.createRoot(document.getElementById('root')).render(<App />);
   </script>
+
 </body>
 </html>
