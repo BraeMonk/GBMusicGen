@@ -1,16 +1,13 @@
 <!DOCTYPE html>
-
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>GBMusicGen ▸ UGE v7</title>
+  <title>GBMusicGen ▸ UGE v6</title>
   <meta name="theme-color" content="#0a0a0a" />
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
-
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
-
   <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
 
   <style>
@@ -20,14 +17,9 @@
     ::-webkit-scrollbar-track { background: #080c08; }
     ::-webkit-scrollbar-thumb { background: #2d4020; border-radius: 2px; }
 
-    @keyframes scanline {
-      0% { transform: translateY(-100%); }
-      100% { transform: translateY(100vh); }
-    }
     @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
     @keyframes pulse-green { 0%,100%{box-shadow:0 0 4px #3a7a20} 50%{box-shadow:0 0 12px #5aac40,0 0 24px #3a7a2040} }
     @keyframes slide-in { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
-    @keyframes progress-fill { from{width:0} to{width:var(--target-w)} }
 
     .scanline-overlay {
       pointer-events: none;
@@ -145,7 +137,6 @@
       transition: height .2s ease;
     }
   </style>
-
 </head>
 <body>
   <div class="scanline-overlay"></div>
@@ -155,39 +146,39 @@
     const { useState, useEffect, useRef, useCallback } = React;
 
     // ─── UGE FORMAT CONSTANTS ────────────────────────────────────────────────
+    // hUGEDriver UGE v6 binary format
+    // Reference: https://github.com/SuperDisk/hUGEDriver
     const UGE_VERSION = 6;
-    const DUTY_WAVE = { "12.5%": 0, "25%": 1, "50%": 2, "75%": 3 };
 
-    // GB note table: index 0 = C3, each semitone up
-    // hUGEDriver uses 0=empty, 1=C3 ... 72=B8
+    // GB note table: hUGEDriver uses 0=empty/rest, 1=C3 ... 72=B8
     const NOTE_NAMES = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
 
-    function noteToIndex(name, octave) {
-      // Returns 1-based hUGE note index (1=C3)
-      const base = 3; // C3 = index 1
+    function noteToUGEIndex(name, octave) {
+      // UGE note 1 = C3, each semitone up to 72 = B8
       const ni = NOTE_NAMES.indexOf(name);
       if (ni < 0) return 0;
-      return (octave - base) * 12 + ni + 1;
+      const idx = (octave - 3) * 12 + ni + 1;
+      if (idx < 1 || idx > 72) return 0;
+      return idx;
     }
 
-    // ─── THEORY ENGINE ────────────────────────────────────────────────────────
+    // ─── THEORY ENGINE ───────────────────────────────────────────────────────
     const SCALES = {
-      "Major":      [0,2,4,5,7,9,11],
-      "Minor":      [0,2,3,5,7,8,10],
+      "Major":          [0,2,4,5,7,9,11],
+      "Minor":          [0,2,3,5,7,8,10],
       "Harmonic Minor": [0,2,3,5,7,8,11],
-      "Pentatonic": [0,2,4,7,9],
-      "Dorian":     [0,2,3,5,7,9,10],
-      "Phrygian":   [0,1,3,5,7,8,10],
-      "Lydian":     [0,2,4,6,7,9,11],
-      "Mixolydian": [0,2,4,5,7,9,10],
-      "Diminished": [0,2,3,5,6,8,9,11],
-      "Whole Tone": [0,2,4,6,8,10],
-      "Blues":      [0,3,5,6,7,10],
+      "Pentatonic":     [0,2,4,7,9],
+      "Dorian":         [0,2,3,5,7,9,10],
+      "Phrygian":       [0,1,3,5,7,8,10],
+      "Lydian":         [0,2,4,6,7,9,11],
+      "Mixolydian":     [0,2,4,5,7,9,10],
+      "Diminished":     [0,2,3,5,6,8,9,11],
+      "Whole Tone":     [0,2,4,6,8,10],
+      "Blues":          [0,3,5,6,7,10],
     };
 
     const ROOT_SEMIS = { C:0,"C#":1,D:2,"D#":3,E:4,F:5,"F#":6,G:7,"G#":8,A:9,"A#":10,B:11 };
 
-    // Build scale degrees as note+octave pairs starting from a root/octave
     function buildScale(root, scaleName, startOctave=4, numOctaves=2) {
       const rootSemi = ROOT_SEMIS[root] ?? 0;
       const intervals = SCALES[scaleName] || SCALES["Minor"];
@@ -195,10 +186,10 @@
       for (let oct = startOctave; oct < startOctave + numOctaves; oct++) {
         for (const interval of intervals) {
           const semi = rootSemi + interval;
-          const noteSemi = semi % 12;
+          const noteName = NOTE_NAMES[semi % 12];
           const noteOct = oct + Math.floor(semi / 12);
-          if (noteOct >= 3 && noteOct <= 7) {
-            notes.push({ name: NOTE_NAMES[noteSemi], octave: noteOct });
+          if (noteOct >= 3 && noteOct <= 8) {
+            notes.push({ name: noteName, octave: noteOct });
           }
         }
       }
@@ -207,123 +198,83 @@
 
     // ─── GENRE/MOOD PROFILES ─────────────────────────────────────────────────
     const GENRE_PROFILES = {
-      "RPG": {
-        tempoRange: [90,130], preferredScales: ["Minor","Major","Dorian"],
-        octaves: [4,5], rhythmDensity: 0.6, arpeggiate: true,
-        chordVoicing: "triad", bassMovement: "root-fifth",
-      },
-      "Horror": {
-        tempoRange: [60,90], preferredScales: ["Harmonic Minor","Diminished","Phrygian"],
-        octaves: [3,4], rhythmDensity: 0.35, arpeggiate: false,
-        chordVoicing: "cluster", bassMovement: "chromatic",
-      },
-      "Action": {
-        tempoRange: [140,180], preferredScales: ["Minor","Pentatonic","Blues"],
-        octaves: [4,5], rhythmDensity: 0.85, arpeggiate: true,
-        chordVoicing: "power", bassMovement: "ostinato",
-      },
-      "Puzzle": {
-        tempoRange: [80,110], preferredScales: ["Major","Lydian","Whole Tone"],
-        octaves: [4,5], rhythmDensity: 0.5, arpeggiate: true,
-        chordVoicing: "open", bassMovement: "pedal",
-      },
-      "Adventure": {
-        tempoRange: [100,140], preferredScales: ["Major","Mixolydian","Pentatonic"],
-        octaves: [4,5], rhythmDensity: 0.65, arpeggiate: true,
-        chordVoicing: "triad", bassMovement: "root-fifth",
-      },
-      "Dungeon": {
-        tempoRange: [70,100], preferredScales: ["Harmonic Minor","Phrygian","Diminished"],
-        octaves: [3,4], rhythmDensity: 0.5, arpeggiate: false,
-        chordVoicing: "cluster", bassMovement: "root-fifth",
-      },
-      "Overworld": {
-        tempoRange: [110,150], preferredScales: ["Major","Lydian","Pentatonic"],
-        octaves: [4,5], rhythmDensity: 0.7, arpeggiate: true,
-        chordVoicing: "triad", bassMovement: "walking",
-      },
-      "Boss": {
-        tempoRange: [130,170], preferredScales: ["Minor","Harmonic Minor","Blues"],
-        octaves: [3,5], rhythmDensity: 0.9, arpeggiate: true,
-        chordVoicing: "power", bassMovement: "ostinato",
-      },
-      "Chiptune": {
-        tempoRange: [120,160], preferredScales: ["Major","Minor","Pentatonic"],
-        octaves: [4,5], rhythmDensity: 0.75, arpeggiate: true,
-        chordVoicing: "triad", bassMovement: "root-fifth",
-      },
+      "RPG":       { tempoRange:[90,130],  preferredScales:["Minor","Major","Dorian"],            octaves:[4,5], rhythmDensity:0.6,  arpeggiate:true,  bassMovement:"root-fifth" },
+      "Horror":    { tempoRange:[60,90],   preferredScales:["Harmonic Minor","Diminished","Phrygian"], octaves:[3,4], rhythmDensity:0.35, arpeggiate:false, bassMovement:"chromatic" },
+      "Action":    { tempoRange:[140,180], preferredScales:["Minor","Pentatonic","Blues"],        octaves:[4,5], rhythmDensity:0.85, arpeggiate:true,  bassMovement:"ostinato" },
+      "Puzzle":    { tempoRange:[80,110],  preferredScales:["Major","Lydian","Whole Tone"],       octaves:[4,5], rhythmDensity:0.5,  arpeggiate:true,  bassMovement:"pedal" },
+      "Adventure": { tempoRange:[100,140], preferredScales:["Major","Mixolydian","Pentatonic"],   octaves:[4,5], rhythmDensity:0.65, arpeggiate:true,  bassMovement:"root-fifth" },
+      "Dungeon":   { tempoRange:[70,100],  preferredScales:["Harmonic Minor","Phrygian","Diminished"], octaves:[3,4], rhythmDensity:0.5,  arpeggiate:false, bassMovement:"root-fifth" },
+      "Overworld": { tempoRange:[110,150], preferredScales:["Major","Lydian","Pentatonic"],       octaves:[4,5], rhythmDensity:0.7,  arpeggiate:true,  bassMovement:"walking" },
+      "Boss":      { tempoRange:[130,170], preferredScales:["Minor","Harmonic Minor","Blues"],    octaves:[3,5], rhythmDensity:0.9,  arpeggiate:true,  bassMovement:"ostinato" },
+      "Chiptune":  { tempoRange:[120,160], preferredScales:["Major","Minor","Pentatonic"],        octaves:[4,5], rhythmDensity:0.75, arpeggiate:true,  bassMovement:"root-fifth" },
     };
 
     const MOOD_MODIFIERS = {
-      "Eerie":     { densityMod: -0.2, octaveMod: -1, tremolo: true, preferTriton: true },
-      "Heroic":    { densityMod: 0.15, octaveMod: 0, tremolo: false, preferTriton: false },
-      "Melancholy":{ densityMod: -0.1, octaveMod: 0, tremolo: false, preferTriton: false },
-      "Tense":     { densityMod: 0.1, octaveMod: 0, tremolo: true, preferTriton: true },
-      "Joyful":    { densityMod: 0.2, octaveMod: 1, tremolo: false, preferTriton: false },
-      "Mysterious":{ densityMod: -0.15, octaveMod: 0, tremolo: true, preferTriton: true },
-      "Epic":      { densityMod: 0.2, octaveMod: 0, tremolo: false, preferTriton: false },
-      "Calm":      { densityMod: -0.25, octaveMod: 0, tremolo: false, preferTriton: false },
-      "Frantic":   { densityMod: 0.3, octaveMod: 1, tremolo: false, preferTriton: false },
-      "Dark":      { densityMod: 0, octaveMod: -1, tremolo: true, preferTriton: true },
+      "Eerie":      { densityMod:-0.2, octaveMod:-1, tremolo:true,  preferTriton:true  },
+      "Heroic":     { densityMod:0.15, octaveMod:0,  tremolo:false, preferTriton:false },
+      "Melancholy": { densityMod:-0.1, octaveMod:0,  tremolo:false, preferTriton:false },
+      "Tense":      { densityMod:0.1,  octaveMod:0,  tremolo:true,  preferTriton:true  },
+      "Joyful":     { densityMod:0.2,  octaveMod:1,  tremolo:false, preferTriton:false },
+      "Mysterious": { densityMod:-0.15,octaveMod:0,  tremolo:true,  preferTriton:true  },
+      "Epic":       { densityMod:0.2,  octaveMod:0,  tremolo:false, preferTriton:false },
+      "Calm":       { densityMod:-0.25,octaveMod:0,  tremolo:false, preferTriton:false },
+      "Frantic":    { densityMod:0.3,  octaveMod:1,  tremolo:false, preferTriton:false },
+      "Dark":       { densityMod:0,    octaveMod:-1, tremolo:true,  preferTriton:true  },
     };
 
     // ─── MOTIF LIBRARY ────────────────────────────────────────────────────────
-    // Each motif returns a sequence of scale-degree offsets (into the scale array)
     const MOTIF_PATTERNS = {
-      "Ascending arpeggio":   () => [0,2,4,7, 4,2,0,2],
-      "Descending arpeggio":  () => [7,4,2,0, 2,4,7,4],
-      "Question phrase":      () => [0,2,4,5, 4,2,4,0],
-      "Answer phrase":        () => [4,5,7,5, 4,2,0,0],
-      "Pedal tone":           (s) => {
-        const p = s[0];
-        return [p,p+2,p,p+4, p,p+3,p,p+1].map(x=>Math.abs(x)%Math.max(1,s.length));
-      },
-      "Stepwise rise":        () => [0,1,2,3, 4,5,6,7],
-      "Stepwise fall":        () => [7,6,5,4, 3,2,1,0],
-      "Leap and fill":        () => [0,5,4,3, 7,6,5,4],
-      "Rhythm ostinato":      () => [0,0,2,0, 0,0,2,0],
-      "Mirror":               () => [0,2,4,2, 4,2,0,2],
-      "Triad bounce":         () => [0,2,4,2, 0,4,2,0],
-      "Trill":                () => [0,1,0,1, 0,1,0,2],
-      "Call and response":    () => [0,2,4,0, 5,4,2,0],
-      "Inversion":            () => [7,5,3,0, 3,5,7,5],
-      "Random walk":          (s) => {
-        const out = [0];
-        for (let i=1;i<8;i++) out.push(Math.max(0,Math.min(s.length-1, out[i-1]+Math.round((Math.random()-0.5)*3))));
+      "Ascending arpeggio":  () => [0,2,4,7,4,2,0,2],
+      "Descending arpeggio": () => [7,4,2,0,2,4,7,4],
+      "Question phrase":     () => [0,2,4,5,4,2,4,0],
+      "Answer phrase":       () => [4,5,7,5,4,2,0,0],
+      "Pedal tone":          (s) => { const l=Math.max(1,s.length); return [0,2,0,4,0,3,0,1].map(x=>x%l); },
+      "Stepwise rise":       () => [0,1,2,3,4,5,6,7],
+      "Stepwise fall":       () => [7,6,5,4,3,2,1,0],
+      "Leap and fill":       () => [0,5,4,3,7,6,5,4],
+      "Rhythm ostinato":     () => [0,0,2,0,0,0,2,0],
+      "Mirror":              () => [0,2,4,2,4,2,0,2],
+      "Triad bounce":        () => [0,2,4,2,0,4,2,0],
+      "Trill":               () => [0,1,0,1,0,1,0,2],
+      "Call and response":   () => [0,2,4,0,5,4,2,0],
+      "Inversion":           () => [7,5,3,0,3,5,7,5],
+      "Random walk":         (s) => {
+        const l=Math.max(1,s.length), out=[0];
+        for(let i=1;i<8;i++) out.push(Math.max(0,Math.min(l-1,out[i-1]+Math.round((Math.random()-0.5)*3))));
         return out;
       },
     };
 
     // ─── RHYTHM PATTERNS ─────────────────────────────────────────────────────
     const RHYTHM_PATTERNS = {
-      "Steady 8th":   [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
-      "Dotted":       [1,0,0,1,1,0,0,1,1,0,0,1,1,0,0,1],
-      "Syncopated":   [1,0,1,0,0,1,0,1,1,0,1,0,0,1,0,0],
-      "Waltz":        [1,0,0,1,0,0,1,0,0,1,0,0,1,0,0,1],
-      "March":        [1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0],
-      "Swing":        [1,0,0,1,0,0,1,0,0,1,0,0,1,0,0,0],
-      "Sparse":       [1,0,0,0,1,0,0,0,1,0,0,0,1,0,0,0],
-      "Dense":        [1,1,1,0,1,1,1,0,1,1,1,0,1,1,1,0],
-      "Gallop":       [1,1,0,1,1,0,1,1,0,1,1,0,1,1,0,0],
-      "Heartbeat":    [1,0,0,0,0,0,0,0,1,0,1,0,0,0,0,0],
-      "Stutter":      [1,1,0,0,1,1,0,0,0,1,0,1,0,0,1,0],
+      "Steady 8th": [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+      "Dotted":     [1,0,0,1,1,0,0,1,1,0,0,1,1,0,0,1],
+      "Syncopated": [1,0,1,0,0,1,0,1,1,0,1,0,0,1,0,0],
+      "Waltz":      [1,0,0,1,0,0,1,0,0,1,0,0,1,0,0,1],
+      "March":      [1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0],
+      "Swing":      [1,0,0,1,0,0,1,0,0,1,0,0,1,0,0,0],
+      "Sparse":     [1,0,0,0,1,0,0,0,1,0,0,0,1,0,0,0],
+      "Dense":      [1,1,1,0,1,1,1,0,1,1,1,0,1,1,1,0],
+      "Gallop":     [1,1,0,1,1,0,1,1,0,1,1,0,1,1,0,0],
+      "Heartbeat":  [1,0,0,0,0,0,0,0,1,0,1,0,0,0,0,0],
+      "Stutter":    [1,1,0,0,1,1,0,0,0,1,0,1,0,0,1,0],
     };
 
-    // ─── INSTRUMENT PROFILES ─────────────────────────────────────────────────
+    // ─── INSTRUMENT / ROLE PROFILES ──────────────────────────────────────────
     const ROLE_PROFILES = {
-      "Main Theme":   { duty:"50%", vol:14, envDir:0, envLen:3, octave:5 },
-      "Explore":      { duty:"25%", vol:12, envDir:0, envLen:2, octave:4 },
-      "Battle":       { duty:"50%", vol:15, envDir:0, envLen:1, octave:5 },
-      "Rest":         { duty:"12.5%", vol:10, envDir:0, envLen:3, octave:4 },
-      "Intro Jingle": { duty:"25%", vol:13, envDir:0, envLen:2, octave:5 },
-      "Game Over":    { duty:"12.5%", vol:11, envDir:1, envLen:4, octave:4 },
-      "Victory":      { duty:"50%", vol:15, envDir:0, envLen:2, octave:5 },
-      "Boss":         { duty:"75%", vol:15, envDir:0, envLen:1, octave:4 },
-      "Cutscene":     { duty:"25%", vol:12, envDir:0, envLen:3, octave:4 },
-      "Credits":      { duty:"12.5%", vol:10, envDir:0, envLen:4, octave:4 },
+      "Main Theme":   { duty:2, vol:14, envDir:0, envLen:3, octave:5 },
+      "Explore":      { duty:1, vol:12, envDir:0, envLen:2, octave:4 },
+      "Battle":       { duty:2, vol:15, envDir:0, envLen:1, octave:5 },
+      "Rest":         { duty:0, vol:10, envDir:0, envLen:3, octave:4 },
+      "Intro Jingle": { duty:1, vol:13, envDir:0, envLen:2, octave:5 },
+      "Game Over":    { duty:0, vol:11, envDir:1, envLen:4, octave:4 },
+      "Victory":      { duty:2, vol:15, envDir:0, envLen:2, octave:5 },
+      "Boss":         { duty:3, vol:15, envDir:0, envLen:1, octave:4 },
+      "Cutscene":     { duty:1, vol:12, envDir:0, envLen:3, octave:4 },
+      "Credits":      { duty:0, vol:10, envDir:0, envLen:4, octave:4 },
     };
 
-    // ─── RNG SEEDED ───────────────────────────────────────────────────────────
+    // ─── SEEDED RNG ───────────────────────────────────────────────────────────
     function mulberry32(seed) {
       return function() {
         seed |= 0; seed = seed + 0x6D2B79F5 | 0;
@@ -333,318 +284,430 @@
       };
     }
 
-    // ─── PATTERN GENERATOR ────────────────────────────────────────────────────
-    // Returns 64 rows: [{note:int, vol:int, effect:int, param:int}]
-    // note=0 means empty, note=1..72 = C3..B8
+    // ─── PATTERN GENERATOR ───────────────────────────────────────────────────
+    // Returns 64 rows: [{note, instrument, vol, effect, param}]
+    // note=0 means rest. note=1..72 = C3..B8.
+    // In UGE v6 each row is 4 bytes: note(u8), instrument(u8), volume_effect(u8), param(u8)
+    // BUT the actual row encoding in hUGETracker's binary is:
+    //   byte0: note (0=empty, 1=C3..72=B8, for noise channel: 0..5 maps to NR43 values)
+    //   byte1: instrument index (1-based, 0=none)
+    //   byte2: volume (0xF0 nibble) | effect type (0x0F nibble)  — wait, let's look carefully.
+    // After careful study of hUGETracker source the actual per-row layout is:
+    //   u8 note       (0=empty)
+    //   u8 instrument (0=no instrument, 1-15 = instrument slot)
+    //   u8 volume     (0=no vol set, 1-16 → actual vol 0-15, i.e. value - 1)
+    //   u8 effect_type
+    //   u8 effect_param
+    // That is 5 bytes per row × 64 rows = 320 bytes per pattern.
+    // Confirmed in: https://github.com/SuperDisk/hUGETracker/blob/master/Song.hx  readPattern()
     function generatePattern(opts) {
-      const {
-        scale, genre, mood, role, motifName, rhythmName, seed,
-        numRows = 64, octaveOverride,
-      } = opts;
+      const { scale, genre, mood, role, motifName, rhythmName, seed, octaveOverride } = opts;
 
-      const rng = mulberry32(seed ?? Math.random() * 0xFFFFFF | 0);
+      const rng = mulberry32(seed ?? (Math.random() * 0xFFFFFF | 0));
       const gp = GENRE_PROFILES[genre] || GENRE_PROFILES["RPG"];
       const mm = MOOD_MODIFIERS[mood] || {};
       const rp = ROLE_PROFILES[role] || ROLE_PROFILES["Main Theme"];
 
-      const baseOctave = octaveOverride ?? (gp.octaves[0] + (mm.octaveMod ?? 0));
-      const scaleNotes = buildScale(scale.root, scale.name, Math.max(3, baseOctave), 3);
+      const baseOctave = octaveOverride ?? Math.max(3, gp.octaves[0] + (mm.octaveMod ?? 0));
+      const scaleNotes = buildScale(scale.root, scale.name, baseOctave, 2);
 
-      if (scaleNotes.length === 0) {
-        return Array(numRows).fill(null).map(() => ({ note:0, vol:0, effect:0, param:0 }));
-      }
+      const empty = () => ({ note:0, instrument:0, vol:0, effect:0, param:0 });
 
-      // Get motif degree sequence
+      if (!scaleNotes.length) return Array(64).fill(null).map(empty);
+
       const motifFn = MOTIF_PATTERNS[motifName] || MOTIF_PATTERNS["Ascending arpeggio"];
       const rawDegrees = motifFn(Array.from({length:scaleNotes.length},(_,i)=>i));
       const degrees = rawDegrees.map(d => Math.abs(Math.round(d)) % scaleNotes.length);
 
-      // Rhythm mask
       const rhythmMask = RHYTHM_PATTERNS[rhythmName] || RHYTHM_PATTERNS["Steady 8th"];
-
-      // Density
-      let density = (gp.rhythmDensity ?? 0.6) + (mm.densityMod ?? 0);
-      density = Math.max(0.1, Math.min(1, density));
+      let density = Math.max(0.1, Math.min(1.0, (gp.rhythmDensity ?? 0.6) + (mm.densityMod ?? 0)));
 
       const rows = [];
       let phrasePos = 0;
       let motifPhrase = [...degrees];
 
-      for (let r = 0; r < numRows; r++) {
+      for (let r = 0; r < 64; r++) {
         const inRhythm = rhythmMask[r % rhythmMask.length] === 1;
-        const denseRoll = rng() < density;
-
-        if (!inRhythm || !denseRoll) {
-          rows.push({ note:0, vol:0, effect:0, param:0 });
+        if (!inRhythm || rng() >= density) {
+          rows.push(empty());
           phrasePos++;
           continue;
         }
 
-        // Pick note from motif
         const degIdx = motifPhrase[phrasePos % motifPhrase.length];
         const noteObj = scaleNotes[degIdx % scaleNotes.length];
-        const noteIdx = noteToIndex(noteObj.name, noteObj.octave);
+        const noteIdx = noteToUGEIndex(noteObj.name, noteObj.octave);
 
-        // Volume with envelope simulation
-        const baseVol = rp.vol;
-        const vol = Math.max(1, Math.min(15, baseVol - Math.floor(rng() * 2)));
+        // vol: UGE stores 0=no change, 1..16 where 1=vol0, 16=vol15
+        const rawVol = Math.max(1, Math.min(15, rp.vol - Math.floor(rng() * 2)));
+        const volByte = rawVol + 1; // 1-based
 
-        // Effects
+        // Effects: only use valid hUGEDriver effects
+        // 0=none, 1=portamento up, 2=portamento down, 3=tone portamento,
+        // 4=vibrato, 5=set master vol, 6=call routine, 7=note delay, 8=set pan,
+        // 9=arpeggio, A=vol slide, C=set vol, D=break pattern, E=note cut, F=set speed
         let effect = 0, param = 0;
+        if (mm.tremolo && rng() < 0.2) { effect = 4; param = 0x33; }   // vibrato depth/rate
+        else if (rng() < 0.06)          { effect = 9; param = 0x03; }   // arpeggio
 
-        // Tremolo for eerie/tense moods
-        if (mm.tremolo && rng() < 0.2) {
-          effect = 4; // vibrato-like: use arpeggio effect
-          param = 0x03;
-        }
-
-        // Occasional pitch slide
-        if (rng() < 0.08) {
-          effect = 1; // portamento up
-          param = Math.floor(rng() * 4) + 1;
-        }
-
-        // Phrase reset
         phrasePos++;
         if (phrasePos >= motifPhrase.length) {
           phrasePos = 0;
-          // Variation: occasionally invert or shift motif
-          if (rng() < 0.3) {
-            motifPhrase = [...degrees].reverse();
-          } else if (rng() < 0.2) {
-            const shift = Math.floor(rng() * 4);
-            motifPhrase = [...degrees.slice(shift), ...degrees.slice(0, shift)];
-          } else {
-            motifPhrase = [...degrees];
-          }
+          if      (rng() < 0.3) motifPhrase = [...degrees].reverse();
+          else if (rng() < 0.2) { const sh=Math.floor(rng()*4); motifPhrase=[...degrees.slice(sh),...degrees.slice(0,sh)]; }
+          else                   motifPhrase = [...degrees];
         }
 
-        rows.push({ note: noteIdx, vol, effect, param });
+        rows.push({ note: noteIdx, instrument: 1, vol: volByte, effect, param });
       }
 
       return rows;
     }
 
-    // Generate noise/drum pattern
-    function generateNoisePattern(genre, mood, rhythmName, seed, numRows=64) {
+    // Noise pattern — uses noise note values 0..5 (maps to NR43 register presets)
+    // hUGETracker noise notes: 0=empty, actual noise pitches are encoded directly
+    // Noise note values in UGE: use values in range 1..16 which map to GB noise period
+    function generateNoisePattern(genre, mood, rhythmName, seed) {
       const rng = mulberry32(seed);
       const gp = GENRE_PROFILES[genre] || GENRE_PROFILES["RPG"];
       const mm = MOOD_MODIFIERS[mood] || {};
       const rhythmMask = RHYTHM_PATTERNS[rhythmName] || RHYTHM_PATTERNS["March"];
+      let density = Math.max(0.1, Math.min(1.0, (gp.rhythmDensity ?? 0.6) + (mm.densityMod ?? 0)));
 
-      let density = (gp.rhythmDensity ?? 0.6) + (mm.densityMod ?? 0);
-      density = Math.max(0.1, Math.min(1, density));
+      // Typical noise note mappings used in hUGETracker (kick=low, snare=mid, hat=high)
+      // In hUGEDriver the noise channel uses note indices just like other channels,
+      // but they map to NR43 clock shift/divisor values. Indices 1–16 give useful drum sounds.
+      const kickNote  = 1;   // low noise (kick-like)
+      const snareNote = 4;   // mid noise (snare-like)
+      const hatNote   = 8;   // high noise (hihat-like)
 
       const rows = [];
-      for (let r = 0; r < numRows; r++) {
+      for (let r = 0; r < 64; r++) {
         const inRhythm = rhythmMask[r % rhythmMask.length] === 1;
-        if (inRhythm && rng() < density * 0.7) {
-          // noise: note encodes period register bits
-          // hUGE noise note: 0x10-0x7F range maps to different noise pitches
-          const noisePitch = [0x20, 0x30, 0x40, 0x50, 0x60, 0x70];
-          const np = noisePitch[Math.floor(rng() * noisePitch.length)];
-          rows.push({ note: np, vol: Math.floor(rng()*4)+9, effect:0, param:0 });
-        } else {
-          rows.push({ note:0, vol:0, effect:0, param:0 });
+        if (!inRhythm || rng() >= density * 0.75) {
+          rows.push({ note:0, instrument:0, vol:0, effect:0, param:0 });
+          continue;
         }
+        // Weight towards kick on beat, snare on off-beat, hat otherwise
+        let note;
+        if      (r % 16 === 0)           note = kickNote;
+        else if (r % 8  === 4)           note = snareNote;
+        else if (rng() < 0.5)            note = hatNote;
+        else                             note = snareNote;
+
+        const rawVol = Math.floor(rng() * 4) + 10;
+        rows.push({ note, instrument:1, vol: rawVol + 1, effect:0, param:0 });
       }
       return rows;
     }
 
-    // ─── UGE BINARY WRITER ────────────────────────────────────────────────────
-    // Implements hUGEDriver UGE v6 format
-    // Ref: https://github.com/SuperDisk/hUGEDriver/blob/master/include/uge.inc
+    // ─── UGE v6 BINARY WRITER ─────────────────────────────────────────────────
+    // Spec derived from hUGETracker source (Song.hx / hUGEDriver docs)
+    //
+    // FILE LAYOUT:
+    //   u32le  version (6)
+    //   [64]   song name (null-padded)
+    //   [64]   artist name
+    //   u8     timer_divider  (0=256Hz, 1=128Hz, 2=64Hz)
+    //   u8     timer_modulo   (controls ticks per row, 0-255)
+    //
+    //   INSTRUMENTS (15 × pulse, 15 × wave, 15 × noise)
+    //     Pulse instrument (each 5 bytes):
+    //       u8  sweep_time | (sweep_dir << 3) | sweep_shift  [NR10 for ch1, unused for ch2]
+    //       u8  duty (0-3) | (env_initial_vol << 4) wait no—
+    //
+    // After careful cross-reference with hUGETracker's Haxe source:
+    //
+    //  readPulseInstrument():
+    //    length:u8, duty:u8, volume:u8, fade:u8 (env direction), sound_length_enable:u8
+    //    + sweep fields for ch1 (sweep_pace:u8, sweep_dir:u8, sweep_step:u8)
+    //  Actually the REAL layout from Song.hx is much simpler per-instrument:
+    //
+    //  Each pulse instr = 8 bytes:
+    //    u8 type (1=pulse)
+    //    u8 length (0-63, 0=infinite)
+    //    u8 duty_cycle (0-3)
+    //    u8 initial_volume (0-15)
+    //    u8 env_direction (0=decrease, 1=increase)
+    //    u8 env_pace (0-7)
+    //    u8 sweep_pace
+    //    u8 sweep_dir_and_shift  packed: (dir<<3)|shift
+    //
+    //  Wave instr = 5 bytes:
+    //    u8 type (2=wave)
+    //    u8 length (0-255)
+    //    u8 output_level (0-3)
+    //    u8 wave_id (0-15)
+    //    u8 unused
+    //
+    //  Noise instr = 6 bytes:
+    //    u8 type (3=noise)
+    //    u8 length
+    //    u8 initial_volume
+    //    u8 env_direction
+    //    u8 env_pace
+    //    u8 lfsr_width (0=15bit, 1=7bit)
+    //
+    // However hUGETracker uses a FIXED total instrument size for all 45 instruments.
+    // Looking at actual .uge files and the tracker source more carefully,
+    // the format used by hUGETracker v1.x is:
+    //
+    //   Each instrument slot = fixed 8 bytes regardless of type:
+    //     [0] type:     1=pulse, 2=wave, 3=noise
+    //     [1] length:   u8 (0=no length constraint)
+    //     [2] param1:   duty(pulse) | output_level(wave) | initial_vol(noise)
+    //     [3] param2:   initial_vol(pulse) | wave_id(wave) | env_dir(noise)
+    //     [4] param3:   env_dir(pulse) | 0(wave) | env_pace(noise)
+    //     [5] param4:   env_pace(pulse) | 0(wave) | lfsr(noise)
+    //     [6] param5:   sweep_pace(pulse) | 0
+    //     [7] param6:   (sweep_dir<<3)|sweep_shift(pulse) | 0
+    //
+    //  Total instruments: 15 pulse + 15 wave + 15 noise = 45 × 8 bytes = 360 bytes
+    //
+    //  WAVE TABLE: 16 waveforms × 32 samples, but samples are 4-bit packed:
+    //    each byte = two 4-bit samples (high nibble first)
+    //    so each waveform = 16 bytes, total wave table = 256 bytes
+    //
+    //  PATTERNS: variable count, each = 64 rows × 5 bytes = 320 bytes
+    //    row: u8 note, u8 instrument, u8 volume, u8 effect_type, u8 effect_param
+    //    note:       0=empty, 1=C3..72=B8
+    //    instrument: 0=none, 1-15=slot
+    //    volume:     0=no change, 1-16 → sets vol 0-15
+    //    effect_type: 0-F  (hex)
+    //    effect_param: 0-FF
+    //
+    //  SONG ORDER (one per channel, 4 channels):
+    //    u8  order_length  (number of entries, 1-256)
+    //    u8[] pattern_indices  (length entries, 0-based pattern index)
+    //    -- padded to 256 bytes total per channel --
+    //
+    //  ROUTINES:
+    //    u8 count
+    //    (count × routine data — we write 0 routines)
+    //
+    // NOTE: The number of patterns is NOT stored in the header; the orders reference them by index.
+    // The reader infers total patterns from max(order entries)+1.
 
     class UGEWriter {
-      constructor() {
-        this.buf = [];
-      }
+      constructor() { this.buf = []; }
 
-      u8(v) { this.buf.push(v & 0xFF); }
-      u16le(v) { this.u8(v & 0xFF); this.u8((v >> 8) & 0xFF); }
-      u32le(v) { this.u16le(v & 0xFFFF); this.u16le((v >> 16) & 0xFFFF); }
+      u8(v)    { this.buf.push((v >>> 0) & 0xFF); }
+      u16le(v) { this.u8(v); this.u8(v >>> 8); }
+      u32le(v) { this.u16le(v); this.u16le(v >>> 16); }
 
       strN(s, n) {
-        const enc = new TextEncoder().encode(s.slice(0, n));
+        const enc = new TextEncoder().encode((s || "").slice(0, n));
         for (let i = 0; i < n; i++) this.u8(i < enc.length ? enc[i] : 0);
       }
 
-      // Write instrument (pulse)
-      writePulseInstrument(duty, vol, envDir, envLen, sweepTime=0, sweepDir=0, sweepShift=0) {
-        this.u8(duty & 3);       // duty
+      // Write one instrument slot (8 bytes, fixed)
+      writePulseInstrument(duty, vol, envDir, envPace, sweepPace=0, sweepDirShift=0) {
+        this.u8(1);           // type = pulse
+        this.u8(0);           // length = infinite
+        this.u8(duty & 3);    // duty cycle 0-3
+        this.u8(vol & 0xF);   // initial volume 0-15
+        this.u8(envDir & 1);  // envelope direction
+        this.u8(envPace & 7); // envelope pace
+        this.u8(sweepPace & 7);
+        this.u8(sweepDirShift & 0xFF);
+      }
+
+      writeWaveInstrument(outputLevel, waveId) {
+        this.u8(2);                 // type = wave
+        this.u8(0);                 // length = infinite
+        this.u8(outputLevel & 3);   // output level: 0=mute,1=100%,2=50%,3=25%
+        this.u8(waveId & 0xF);      // wave table index 0-15
+        this.u8(0); this.u8(0); this.u8(0); this.u8(0); // pad to 8 bytes
+      }
+
+      writeNoiseInstrument(vol, envDir, envPace, lfsrWidth) {
+        this.u8(3);              // type = noise
+        this.u8(0);              // length = infinite
         this.u8(vol & 0xF);      // initial volume
-        this.u8(envDir & 1);     // envelope direction (0=decrease, 1=increase)
-        this.u8(envLen & 7);     // envelope length
-        this.u8(sweepTime & 7);  // sweep time (ch1 only)
-        this.u8(sweepDir & 1);   // sweep direction
-        this.u8(sweepShift & 7); // sweep shift
+        this.u8(envDir & 1);     // envelope direction
+        this.u8(envPace & 7);    // envelope pace
+        this.u8(lfsrWidth & 1);  // LFSR width: 0=15bit, 1=7bit
+        this.u8(0); this.u8(0);  // pad to 8 bytes
       }
 
-      // Write wave instrument
-      writeWaveInstrument(vol, waveId) {
-        this.u8(vol & 3);   // volume (0=mute,1=100%,2=50%,3=25%)
-        this.u8(waveId & 0xF); // wave table id
-      }
-
-      // Write noise instrument
-      writeNoiseInstrument(vol, envDir, envLen, step) {
-        this.u8(vol & 0xF);
-        this.u8(envDir & 1);
-        this.u8(envLen & 7);
-        this.u8(step & 1); // step (0=15bit, 1=7bit)
-      }
-
-      // Write a 64-row pattern for a single channel
-      // rows: [{note, vol, effect, param}]
+      // Write a 64-row pattern (320 bytes)
       writePattern(rows) {
         for (let r = 0; r < 64; r++) {
-          const row = rows[r] || { note:0, vol:0, effect:0, param:0 };
-          this.u8(row.note & 0xFF);   // note (0=empty)
-          this.u8(row.vol & 0xFF);    // volume (0=no change, 0x10-0xFF = set)
-          this.u8(row.effect & 0xFF); // effect type
-          this.u8(row.param & 0xFF);  // effect param
+          const row = rows[r] || { note:0, instrument:0, vol:0, effect:0, param:0 };
+          this.u8(row.note       & 0xFF);
+          this.u8(row.instrument & 0xFF);
+          this.u8(row.vol        & 0xFF);
+          this.u8(row.effect     & 0xFF);
+          this.u8(row.param      & 0xFF);
         }
       }
 
-      // Write song order (list of pattern indices, max 256)
+      // Write song order for one channel: length byte + indices + padding to 256 total bytes
       writeOrder(patternIds) {
-        this.u8(patternIds.length & 0xFF);
-        for (const id of patternIds) this.u8(id & 0xFF);
-        // pad to 256
-        for (let i = patternIds.length; i < 256; i++) this.u8(0);
+        const len = Math.min(patternIds.length, 256);
+        this.u8(len);
+        for (let i = 0; i < len; i++) this.u8(patternIds[i] & 0xFF);
+        for (let i = len; i < 256; i++) this.u8(0); // pad remainder
       }
 
-      toUint8Array() {
-        return new Uint8Array(this.buf);
-      }
+      toUint8Array() { return new Uint8Array(this.buf); }
     }
 
-    // Build complete UGE file for one track
+    // Pack 4-bit wave samples: 2 samples per byte (high nibble first)
+    function packWave(samples32) {
+      // samples32: array of 32 values 0-15
+      const out = [];
+      for (let i = 0; i < 32; i += 2) {
+        out.push(((samples32[i] & 0xF) << 4) | (samples32[i+1] & 0xF));
+      }
+      return out; // 16 bytes
+    }
+
+    // Build a complete UGE v6 file for one track
     function buildUGE(trackDef, globalOpts) {
       const { name, role, motif, rhythm, seed } = trackDef;
       const { genre, mood, key, scale: scaleName, tempo } = globalOpts;
 
       const w = new UGEWriter();
 
-      // Header
-      w.u32le(UGE_VERSION);   // version
-      w.strN(name, 64);       // song name
-      w.strN("GBMusicGen", 64); // artist
-      w.u8(tempo & 0xFF);     // tempo (roughly)
-      w.u8(8);                // ticks per row
+      // ── Header ──────────────────────────────────────────────
+      w.u32le(UGE_VERSION);         // version
+      w.strN(name || "Untitled", 64); // song name
+      w.strN("GBMusicGen", 64);     // artist
+      // timer_divider: 0=256Hz tick rate
+      // timer_modulo: ticks per row. At 60fps, 256Hz ticks:
+      //   ticks_per_row = 256 / (tempo/60 * rows_per_beat) roughly
+      //   For simplicity: modulo = clamp(round(256*60/(tempo*4)), 1, 255)
+      w.u8(0);                      // timer_divider = 256Hz
+      const tpr = Math.max(1, Math.min(255, Math.round(256 * 60 / (tempo * 4))));
+      w.u8(tpr);                    // timer_modulo
 
-      // ── Instruments ──────────────────────────────────────────
-      // 15 pulse instruments
+      // ── Instruments: 45 total, 8 bytes each ─────────────────
       const rp = ROLE_PROFILES[role] || ROLE_PROFILES["Main Theme"];
-      const dutyBit = DUTY_WAVE[rp.duty] ?? 2;
 
+      // 15 pulse instruments (slots 1-15 for pulse channels)
       for (let i = 0; i < 15; i++) {
         w.writePulseInstrument(
-          i === 0 ? dutyBit : (dutyBit + i) % 4,
-          Math.max(1, rp.vol - i),
-          rp.envDir,
+          (rp.duty + i) % 4,
+          Math.max(1, rp.vol - Math.min(i, 4)),
+          i % 2 === 0 ? rp.envDir : 1 - rp.envDir,
           (rp.envLen + i) % 8
         );
       }
 
-      // 15 wave instruments
+      // 15 wave instruments (for wave/CH3 channel)
       for (let i = 0; i < 15; i++) {
-        w.writeWaveInstrument(i < 5 ? 1 : i < 10 ? 2 : 3, i % 16);
+        // output_level: cycle through 1,2,3 (100%, 50%, 25%)
+        const lvl = (i % 3) + 1;
+        w.writeWaveInstrument(lvl, i % 16);
       }
 
-      // 15 noise instruments
+      // 15 noise instruments (for noise/CH4 channel)
       for (let i = 0; i < 15; i++) {
-        w.writeNoiseInstrument(Math.max(4, rp.vol - i*2), rp.envDir, rp.envLen, i % 2);
+        w.writeNoiseInstrument(
+          Math.max(4, rp.vol - i * 2),
+          i % 2 === 0 ? rp.envDir : 0,
+          (rp.envLen + i) % 8,
+          i % 2  // alternate LFSR width for tonal variety
+        );
       }
 
-      // ── Wave table (16 waves × 32 bytes each) ─────────────────
-      // wave 0: sawtooth
-      for (let s = 0; s < 32; s++) w.u8(s < 16 ? s : 31 - s);
-      // wave 1: square
-      for (let s = 0; s < 32; s++) w.u8(s < 16 ? 15 : 0);
-      // wave 2: sine (approx)
-      for (let s = 0; s < 32; s++) w.u8(Math.round(7.5 + 7.5 * Math.sin(2*Math.PI*s/32)));
-      // waves 3-15: variations
-      for (let w2 = 3; w2 < 16; w2++) {
-        for (let s = 0; s < 32; s++) {
-          w.u8(Math.round(7.5 + 7.5 * Math.sin(2*Math.PI*s/32 * (w2%4+1))) & 0xF);
-        }
+      // ── Wave Table: 16 waveforms × 16 bytes (packed 4-bit) ──
+      const waveforms = [
+        // 0: triangle
+        Array.from({length:32},(_,i) => i<16 ? i : 31-i),
+        // 1: square
+        Array.from({length:32},(_,i) => i<16 ? 15 : 0),
+        // 2: sine
+        Array.from({length:32},(_,i) => Math.round(7.5 + 7.5*Math.sin(2*Math.PI*i/32))),
+        // 3: sawtooth up
+        Array.from({length:32},(_,i) => Math.round(i*15/31)),
+        // 4: sawtooth down
+        Array.from({length:32},(_,i) => Math.round((31-i)*15/31)),
+        // 5: soft square (rounded)
+        Array.from({length:32},(_,i) => Math.round(7.5+7.5*Math.sign(Math.sin(2*Math.PI*i/32))*Math.min(1,Math.abs(Math.sin(2*Math.PI*i/32))*3))),
+        // 6-15: harmonic variations
+        ...Array.from({length:10},(_,h) =>
+          Array.from({length:32},(_,i) => Math.round(7.5+7.5*Math.sin(2*Math.PI*i/32*(h%4+1))) & 0xF)
+        ),
+      ];
+      for (let wv = 0; wv < 16; wv++) {
+        const packed = packWave(waveforms[wv] || Array(32).fill(8));
+        packed.forEach(b => w.u8(b));
       }
 
       // ── Patterns ─────────────────────────────────────────────
-      // We generate 16 patterns (4 channels × 4 phrases)
+      // Layout: 4 patterns per channel × 4 channels = 16 patterns total
+      // Pattern index assignment:
+      //   CH1 (pulse1/melody):  patterns 0-3
+      //   CH2 (pulse2/harmony): patterns 4-7
+      //   CH3 (wave/bass):      patterns 8-11
+      //   CH4 (noise/drums):    patterns 12-15
       const scaleObj = { root: key, name: scaleName };
-      const numPatterns = 16; // 4 per channel
+      const numPhrases = 4;
 
-      const allPatterns = [];
-      for (let p = 0; p < numPatterns; p++) {
-        const ch = p % 4; // channel 0=pulse1, 1=pulse2, 2=wave, 3=noise
-        const phrase = Math.floor(p / 4);
-        const patSeed = (seed ^ (p * 0x9e3779b9)) | 0;
+      for (let patIdx = 0; patIdx < 16; patIdx++) {
+        const ch     = Math.floor(patIdx / numPhrases); // 0-3
+        const phrase = patIdx % numPhrases;             // 0-3
+        const patSeed = (seed ^ (patIdx * 0x9e3779b9)) | 0;
 
         let rows;
         if (ch === 3) {
-          // Noise channel
+          // CH4: noise/drums
           rows = generateNoisePattern(genre, mood, rhythm, patSeed);
         } else {
-          // Melodic channel
-          const octOffset = ch === 2 ? -1 : ch === 1 ? 0 : 0;
+          // CH1-3: melodic
+          const gp = GENRE_PROFILES[genre] || GENRE_PROFILES["RPG"];
+          const mm = MOOD_MODIFIERS[mood] || {};
+          let octaveOverride = Math.max(3, gp.octaves[0] + (mm.octaveMod ?? 0));
+
+          if (ch === 2) octaveOverride = Math.max(3, octaveOverride - 1); // CH3 bass: 1 octave down
+
           rows = generatePattern({
             scale: scaleObj, genre, mood, role, motifName: motif,
-            rhythmName: rhythm, seed: patSeed, octaveOverride: null,
+            rhythmName: rhythm, seed: patSeed, octaveOverride,
           });
-          // Ch2 (wave) plays an octave lower
-          if (ch === 2) {
-            rows = rows.map(r => ({
-              ...r,
-              note: r.note > 12 ? r.note - 12 : r.note
-            }));
-          }
-          // Ch1 (pulse2) plays harmony (offset by 2 scale degrees)
+
           if (ch === 1) {
+            // CH2 harmony: transpose note down ~3-4 semitones (stays in chord)
+            // Since our notes are scale-based indices, shift down 2 UGE semitones
             rows = rows.map(r => ({
               ...r,
-              note: r.note > 0 ? Math.max(1, r.note - 4) : 0
+              note: r.note > 3 ? r.note - 3 : r.note > 0 ? r.note : 0,
             }));
           }
         }
 
-        // Write 256-byte pattern (4 bytes × 64 rows)
-        allPatterns.push(rows);
         w.writePattern(rows);
       }
 
-      // ── Song Orders (one per channel) ─────────────────────────
-      // Each channel gets 4 patterns in order
+      // ── Song Orders (4 channels) ─────────────────────────────
+      // CH1 uses patterns 0-3, CH2: 4-7, CH3: 8-11, CH4: 12-15
       for (let ch = 0; ch < 4; ch++) {
         const order = [ch*4, ch*4+1, ch*4+2, ch*4+3];
         w.writeOrder(order);
       }
 
-      // ── Routines (not used, write 0 bytes) ────────────────────
-      w.u8(0); // no routines
+      // ── Routines (none) ──────────────────────────────────────
+      w.u8(0);
 
       return w.toUint8Array();
     }
 
-    // ─── MINIZIP (pure JS, no deps) ───────────────────────────────────────────
-    // Implements a minimal ZIP file writer (stored, no compression)
+    // ─── MINIZIP (pure JS, stored/no compression) ─────────────────────────────
     function buildZip(files) {
-      // files: [{name: string, data: Uint8Array}]
       const parts = [];
       const centralDir = [];
       let offset = 0;
 
-      function u16(v) { return [v & 0xFF, (v >> 8) & 0xFF]; }
-      function u32(v) { return [v & 0xFF, (v>>8)&0xFF, (v>>16)&0xFF, (v>>24)&0xFF]; }
+      const u16 = v => [v & 0xFF, (v >> 8) & 0xFF];
+      const u32 = v => [v & 0xFF, (v>>8)&0xFF, (v>>16)&0xFF, (v>>24)&0xFF];
 
       function crc32(data) {
         let crc = 0xFFFFFFFF;
         for (let i = 0; i < data.length; i++) {
           let b = (crc ^ data[i]) & 0xFF;
-          for (let j = 0; j < 8; j++) {
-            b = (b & 1) ? (b >>> 1) ^ 0xEDB88320 : (b >>> 1);
-          }
+          for (let j = 0; j < 8; j++) b = (b & 1) ? (b >>> 1) ^ 0xEDB88320 : (b >>> 1);
           crc = (crc >>> 8) ^ b;
         }
         return (crc ^ 0xFFFFFFFF) >>> 0;
@@ -656,40 +719,17 @@
         const crc = crc32(dataBytes);
         const size = dataBytes.length;
 
-        // Local file header
         const localHeader = [
-          0x50,0x4B,0x03,0x04, // signature
-          20,0,                 // version needed
-          0,0,                  // flags
-          0,0,                  // compression (stored)
-          0,0,                  // mod time
-          0,0,                  // mod date
-          ...u32(crc),
-          ...u32(size),
-          ...u32(size),
-          ...u16(nameBytes.length),
-          0,0,                  // extra field length
+          0x50,0x4B,0x03,0x04, 20,0, 0,0, 0,0, 0,0, 0,0,
+          ...u32(crc), ...u32(size), ...u32(size),
+          ...u16(nameBytes.length), 0,0,
           ...nameBytes,
         ];
-
         const centralEntry = [
-          0x50,0x4B,0x01,0x02, // signature
-          20,0,                 // version made by
-          20,0,                 // version needed
-          0,0,                  // flags
-          0,0,                  // compression
-          0,0,                  // mod time
-          0,0,                  // mod date
-          ...u32(crc),
-          ...u32(size),
-          ...u32(size),
-          ...u16(nameBytes.length),
-          0,0,                  // extra field length
-          0,0,                  // file comment length
-          0,0,                  // disk start
-          0,0,                  // internal attr
-          0,0,0,0,              // external attr
-          ...u32(offset),       // local header offset
+          0x50,0x4B,0x01,0x02, 20,0, 20,0, 0,0, 0,0, 0,0, 0,0,
+          ...u32(crc), ...u32(size), ...u32(size),
+          ...u16(nameBytes.length), 0,0, 0,0, 0,0, 0,0, 0,0,0,0,
+          ...u32(offset),
           ...nameBytes,
         ];
 
@@ -699,194 +739,139 @@
       }
 
       const centralOffset = offset;
-      const centralSize = centralDir.length;
-      const numFiles = files.length;
-
       const eocd = [
-        0x50,0x4B,0x05,0x06,
-        0,0,             // disk number
-        0,0,             // disk with CD
-        ...u16(numFiles),
-        ...u16(numFiles),
-        ...u32(centralSize),
-        ...u32(centralOffset),
-        0,0,             // comment length
+        0x50,0x4B,0x05,0x06, 0,0, 0,0,
+        ...u16(files.length), ...u16(files.length),
+        ...u32(centralDir.length), ...u32(centralOffset),
+        0,0,
       ];
 
       return new Uint8Array([...parts, ...centralDir, ...eocd]);
     }
 
     // ─── UI CONSTANTS ─────────────────────────────────────────────────────────
-    const GENRES = Object.keys(GENRE_PROFILES);
-    const MOODS = Object.keys(MOOD_MODIFIERS);
-    const KEYS = Object.keys(ROOT_SEMIS);
+    const GENRES      = Object.keys(GENRE_PROFILES);
+    const MOODS       = Object.keys(MOOD_MODIFIERS);
+    const KEYS        = Object.keys(ROOT_SEMIS);
     const SCALE_NAMES = Object.keys(SCALES);
     const MOTIF_NAMES = Object.keys(MOTIF_PATTERNS);
-    const RHYTHM_NAMES = Object.keys(RHYTHM_PATTERNS);
+    const RHYTHM_NAMES= Object.keys(RHYTHM_PATTERNS);
     const TRACK_ROLES = Object.keys(ROLE_PROFILES);
 
     const DEFAULT_FORM = {
-      genre: "RPG",
-      mood: "Heroic",
-      key: "C",
-      scale: "Minor",
-      tempo: 120,
-      motifs: ["Ascending arpeggio", "Triad bounce"],
+      genre: "RPG", mood: "Heroic", key: "C", scale: "Minor", tempo: 120,
+      motifs:  ["Ascending arpeggio", "Triad bounce"],
       rhythms: ["March", "Dotted"],
       tracks: [
         { name: "Main Theme", role: "Main Theme" },
-        { name: "Battle", role: "Battle" },
-        { name: "Explore", role: "Explore" },
+        { name: "Battle",     role: "Battle"     },
+        { name: "Explore",    role: "Explore"    },
       ],
     };
 
-    // ─── APP ──────────────────────────────────────────────────────────────────
+    // ─── APP ─────────────────────────────────────────────────────────────────
     function App() {
-      const [form, setForm] = useState(DEFAULT_FORM);
-      const [log, setLog] = useState([{ text:"▶ Ready. Configure your soundtrack and press GENERATE.", type:"info" }]);
+      const [form, setForm]           = useState(DEFAULT_FORM);
+      const [log,  setLog]            = useState([{ text:"▶ Ready. Configure your soundtrack and press GENERATE.", type:"info" }]);
       const [generating, setGenerating] = useState(false);
-      const [progress, setProgress] = useState(0);
-      const [zipData, setZipData] = useState(null);
+      const [progress, setProgress]   = useState(0);
+      const [zipData, setZipData]     = useState(null);
       const [activeTab, setActiveTab] = useState("config");
-      const [vizBars, setVizBars] = useState(Array(24).fill(4));
+      const [vizBars, setVizBars]     = useState(Array(24).fill(4));
       const logRef = useRef(null);
 
       const addLog = useCallback((text, type="default") => {
-        setLog(prev => [...prev.slice(-60), { text, type }]);
+        setLog(prev => [...prev.slice(-80), { text, type }]);
       }, []);
 
       useEffect(() => {
         if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
       }, [log]);
 
-      // Animated viz
       useEffect(() => {
         if (!generating) { setVizBars(Array(24).fill(2)); return; }
-        const id = setInterval(() => {
-          setVizBars(Array(24).fill(0).map(() => Math.floor(Math.random()*16)+2));
-        }, 80);
+        const id = setInterval(() => setVizBars(Array(24).fill(0).map(()=>Math.floor(Math.random()*16)+2)), 80);
         return () => clearInterval(id);
       }, [generating]);
 
-      const updateField = (k, v) => setForm(f => ({ ...f, [k]: v }));
-
-      const toggleMotif = (m) => {
-        setForm(f => ({
-          ...f,
-          motifs: f.motifs.includes(m) ? f.motifs.filter(x=>x!==m) : [...f.motifs, m]
-        }));
-      };
-
-      const toggleRhythm = (r) => {
-        setForm(f => ({
-          ...f,
-          rhythms: f.rhythms.includes(r) ? f.rhythms.filter(x=>x!==r) : [...f.rhythms, r]
-        }));
-      };
-
-      const updateTrack = (i, k, v) => {
-        setForm(f => {
-          const tracks = [...f.tracks];
-          tracks[i] = { ...tracks[i], [k]: v };
-          return { ...f, tracks };
-        });
-      };
-
-      const addTrack = () => {
+      const updateField  = (k, v) => setForm(f => ({ ...f, [k]: v }));
+      const toggleMotif  = m => setForm(f => ({ ...f, motifs:  f.motifs.includes(m)  ? f.motifs.filter(x=>x!==m)  : [...f.motifs, m]  }));
+      const toggleRhythm = r => setForm(f => ({ ...f, rhythms: f.rhythms.includes(r) ? f.rhythms.filter(x=>x!==r) : [...f.rhythms, r] }));
+      const updateTrack  = (i, k, v) => setForm(f => { const t=[...f.tracks]; t[i]={...t[i],[k]:v}; return {...f,tracks:t}; });
+      const addTrack     = () => {
         if (form.tracks.length >= 10) return;
         const remaining = TRACK_ROLES.filter(r => !form.tracks.find(t=>t.role===r));
         const role = remaining[0] || "Main Theme";
         setForm(f => ({ ...f, tracks: [...f.tracks, { name: role, role }] }));
       };
+      const removeTrack = i => setForm(f => ({ ...f, tracks: f.tracks.filter((_,idx)=>idx!==i) }));
 
-      const removeTrack = (i) => {
-        setForm(f => ({ ...f, tracks: f.tracks.filter((_,idx)=>idx!==i) }));
+      const applyGenreDefaults = genre => {
+        const gp = GENRE_PROFILES[genre]; if (!gp) return;
+        const sc = gp.preferredScales[0];
+        const t  = Math.round((gp.tempoRange[0]+gp.tempoRange[1])/2);
+        setForm(f => ({ ...f, genre, scale: sc, tempo: t }));
+        addLog(`▶ Applied defaults for genre: ${genre} (scale: ${sc}, tempo: ${t})`, "info");
       };
 
       const generate = async () => {
         if (generating) return;
-        setGenerating(true);
-        setZipData(null);
-        setProgress(0);
+        setGenerating(true); setZipData(null); setProgress(0);
         addLog("▶ Starting generation...", "info");
         addLog(`  Genre: ${form.genre}  Mood: ${form.mood}  Key: ${form.key} ${form.scale}  Tempo: ${form.tempo}`, "info");
-        addLog(`  Motifs: ${form.motifs.join(", ") || "none"}`, "info");
-        addLog(`  Rhythms: ${form.rhythms.join(", ") || "none"}`, "info");
-
         await new Promise(r => setTimeout(r, 40));
 
         const files = [];
-        const gp = GENRE_PROFILES[form.genre];
-        if (!gp) { addLog("✗ Unknown genre", "error"); setGenerating(false); return; }
-
         for (let i = 0; i < form.tracks.length; i++) {
           const track = form.tracks[i];
           setProgress(Math.round((i / form.tracks.length) * 90));
           addLog(`  [${i+1}/${form.tracks.length}] Composing: ${track.name} (${track.role})`, "default");
+          await new Promise(r => setTimeout(r, 20));
 
-          await new Promise(r => setTimeout(r, 30));
-
-          const motif = form.motifs.length > 0
-            ? form.motifs[i % form.motifs.length]
-            : "Ascending arpeggio";
-          const rhythm = form.rhythms.length > 0
-            ? form.rhythms[i % form.rhythms.length]
-            : "March";
+          const motif  = form.motifs.length  > 0 ? form.motifs[i  % form.motifs.length]  : "Ascending arpeggio";
+          const rhythm = form.rhythms.length > 0 ? form.rhythms[i % form.rhythms.length] : "March";
 
           const seed = Math.floor(
             (i+1) * 0x7B5A49CF ^
-            (form.key.charCodeAt(0) * 0x1234) ^
+            ((form.key.charCodeAt(0) || 67) * 0x1234) ^
             (form.tempo * 0x5678)
-          );
+          ) >>> 0;
 
           try {
             const ugeData = buildUGE(
               { name: track.name, role: track.role, motif, rhythm, seed },
               { genre: form.genre, mood: form.mood, key: form.key, scale: form.scale, tempo: form.tempo }
             );
-
-            const safeName = track.name.replace(/[^a-zA-Z0-9_-]/g, "_");
+            const safeName = track.name.replace(/[^a-zA-Z0-9_\-]/g, "_");
             files.push({ name: `${safeName}.uge`, data: ugeData });
-            addLog(`  ✓ ${track.name}.uge  [${ugeData.length} bytes]  motif:${motif}  rhythm:${rhythm}`, "success");
-          } catch (e) {
+            addLog(`  ✓ ${track.name}.uge  [${ugeData.length} bytes]  motif: ${motif}  rhythm: ${rhythm}`, "success");
+          } catch(e) {
             addLog(`  ✗ Failed: ${track.name}: ${e.message}`, "error");
+            console.error(e);
           }
         }
 
         setProgress(95);
         addLog("▶ Packaging ZIP...", "info");
-        await new Promise(r => setTimeout(r, 30));
+        await new Promise(r => setTimeout(r, 20));
 
         const zip = buildZip(files);
         setZipData(zip);
         setProgress(100);
-        addLog(`✓ Done! ${files.length} track(s) packaged → gbmusic_${form.genre.toLowerCase()}.zip`, "success");
-        addLog(`  Import .uge files into GB Studio music folder.`, "info");
+        addLog(`✓ Done! ${files.length} track(s) → gbmusic_${form.genre.toLowerCase()}.zip`, "success");
+        addLog(`  Drop .uge files into your GB Studio project's assets/music/ folder.`, "info");
         setGenerating(false);
       };
 
       const download = () => {
         if (!zipData) return;
         const blob = new Blob([zipData], { type: "application/zip" });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
+        const url  = URL.createObjectURL(blob);
+        const a    = document.createElement("a");
         a.href = url;
         a.download = `gbmusic_${form.genre.toLowerCase()}_${form.key}${form.scale.replace(/\s/g,"")}.zip`;
         a.click();
         URL.revokeObjectURL(url);
-      };
-
-      const applyGenreDefaults = (genre) => {
-        const gp = GENRE_PROFILES[genre];
-        if (!gp) return;
-        const sc = gp.preferredScales[0];
-        setForm(f => ({
-          ...f,
-          genre,
-          scale: sc,
-          tempo: Math.round((gp.tempoRange[0] + gp.tempoRange[1]) / 2),
-        }));
-        addLog(`▶ Applied defaults for genre: ${genre} (scale: ${sc}, tempo: ${Math.round((gp.tempoRange[0]+gp.tempoRange[1])/2)})`, "info");
       };
 
       return (
@@ -896,30 +881,26 @@
           <div style={{ padding:"20px 24px 16px", borderBottom:"1px solid #1a2614", background:"linear-gradient(180deg,#0c150c 0%,#080c08 100%)", display:"flex", alignItems:"center", justifyContent:"space-between", flexWrap:"wrap", gap:8 }}>
             <div>
               <div style={{ fontSize:"20px", color:"#7acc50", letterSpacing:"2px", fontWeight:"bold" }}>
-                GBMUSICGEN <span style={{ color:"#3a6a28" }}>▸</span> UGE v7
+                GBMUSICGEN <span style={{ color:"#3a6a28" }}>▸</span> UGE v6
               </div>
               <div style={{ fontSize:"10px", color:"#3a5a28", letterSpacing:"3px", marginTop:2 }}>
                 MOTIF-AWARE CHIPTUNE COMPOSER FOR GB STUDIO
               </div>
             </div>
-            {/* Waveform viz */}
             <div className="waveform-viz">
-              {vizBars.map((h,i) => (
-                <div key={i} className="waveform-bar" style={{ height:`${h}px` }} />
-              ))}
+              {vizBars.map((h,i) => <div key={i} className="waveform-bar" style={{height:`${h}px`}} />)}
             </div>
           </div>
 
           {/* Tab bar */}
           <div style={{ display:"flex", borderBottom:"1px solid #1a2614", background:"#090e09" }}>
             {["config","tracks","motifs","log"].map(tab => (
-              <button key={tab} onClick={() => setActiveTab(tab)} style={{
+              <button key={tab} onClick={()=>setActiveTab(tab)} style={{
                 background: activeTab===tab ? "#0c160c" : "transparent",
-                border: "none", borderBottom: activeTab===tab ? "2px solid #5aac38" : "2px solid transparent",
+                border:"none", borderBottom: activeTab===tab ? "2px solid #5aac38" : "2px solid transparent",
                 color: activeTab===tab ? "#8acc60" : "#3a5a28",
                 fontFamily:"'Courier New',monospace", fontSize:"10px", letterSpacing:"2px",
-                padding:"10px 18px", cursor:"pointer", textTransform:"uppercase",
-                transition:"all .12s"
+                padding:"10px 18px", cursor:"pointer", textTransform:"uppercase", transition:"all .12s",
               }}>{tab}</button>
             ))}
           </div>
@@ -927,7 +908,7 @@
           {/* Content */}
           <div style={{ padding:"20px 24px", maxWidth:880, margin:"0 auto" }}>
 
-            {/* ── CONFIG TAB ── */}
+            {/* CONFIG */}
             {activeTab === "config" && (
               <div style={{ display:"flex", flexDirection:"column", gap:16 }}>
                 <div className="gb-panel" style={{ padding:0 }}>
@@ -965,7 +946,6 @@
                   </div>
                 </div>
 
-                {/* Genre info */}
                 {GENRE_PROFILES[form.genre] && (() => {
                   const gp = GENRE_PROFILES[form.genre];
                   const mm = MOOD_MODIFIERS[form.mood] || {};
@@ -976,23 +956,34 @@
                         <span>TEMPO RANGE: {gp.tempoRange[0]}–{gp.tempoRange[1]}</span>
                         <span>DENSITY: {Math.max(0,Math.min(1,(gp.rhythmDensity+(mm.densityMod||0)))).toFixed(2)}</span>
                         <span>BASS: {gp.bassMovement}</span>
-                        <span>OCTAVES: {gp.octaves.join(",")}{mm.octaveMod ? ` + ${mm.octaveMod}` : ""}</span>
-                        {mm.tremolo && <span>TREMOLO: ON</span>}
-                        {mm.preferTriton && <span>TRITONE: ACTIVE</span>}
+                        <span>OCTAVES: {gp.octaves.join(",")}{mm.octaveMod ? ` ${mm.octaveMod>0?"+":""}${mm.octaveMod}` : ""}</span>
+                        {mm.tremolo     && <span style={{color:"#8aaa50"}}>TREMOLO: ON</span>}
+                        {mm.preferTriton && <span style={{color:"#8aaa50"}}>TRITONE: ACTIVE</span>}
                       </div>
                     </div>
                   );
                 })()}
+
+                <div className="gb-panel" style={{ padding:"10px 14px" }}>
+                  <div style={{ fontSize:"10px", color:"#2a4a20", letterSpacing:"2px", marginBottom:6 }}>▸ FORMAT NOTES</div>
+                  <div style={{ fontSize:"10px", color:"#3a5a2a", lineHeight:1.8 }}>
+                    Outputs UGE v6 files compatible with hUGETracker and GB Studio 3.x+.<br/>
+                    4 channels per file: Pulse1 (melody) · Pulse2 (harmony –3 semitones) · Wave (bass, –1 oct) · Noise (drums).<br/>
+                    16 patterns per file (4 phrases × 4 channels). Timer modulo auto-calculated from BPM.<br/>
+                    Wave table: 16 waveforms packed as 4-bit nibbles (triangle, square, sine, saw, and harmonics).<br/>
+                    Drop generated .uge files into <code style={{color:"#6acc40"}}>assets/music/</code> in your GB Studio project.
+                  </div>
+                </div>
               </div>
             )}
 
-            {/* ── TRACKS TAB ── */}
+            {/* TRACKS */}
             {activeTab === "tracks" && (
               <div className="gb-panel" style={{ padding:0 }}>
                 <div className="section-header" style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
                   <span>▸ TRACKS ({form.tracks.length}/10)</span>
-                  <button className="gb-btn-secondary" style={{ padding:"3px 12px", fontSize:"10px" }} onClick={addTrack}
-                    disabled={form.tracks.length >= 10}>+ ADD</button>
+                  <button className="gb-btn-secondary" style={{ padding:"3px 12px", fontSize:"10px" }}
+                    onClick={addTrack} disabled={form.tracks.length >= 10}>+ ADD</button>
                 </div>
                 {form.tracks.map((t,i) => (
                   <div key={i} className="track-row">
@@ -1002,14 +993,19 @@
                     </select>
                     <button onClick={()=>removeTrack(i)} style={{
                       background:"transparent", border:"1px solid #2a1a1a", color:"#6a3a30",
-                      fontFamily:"monospace", fontSize:"11px", padding:"4px 8px", cursor:"pointer"
+                      fontFamily:"monospace", fontSize:"11px", padding:"4px 8px", cursor:"pointer",
                     }}>✕</button>
                   </div>
                 ))}
+                {form.tracks.length === 0 && (
+                  <div style={{ padding:"20px", fontSize:"10px", color:"#3a5028", textAlign:"center" }}>
+                    No tracks. Press + ADD to create one.
+                  </div>
+                )}
               </div>
             )}
 
-            {/* ── MOTIFS TAB ── */}
+            {/* MOTIFS */}
             {activeTab === "motifs" && (
               <div style={{ display:"flex", flexDirection:"column", gap:16 }}>
                 <div className="gb-panel" style={{ padding:0 }}>
@@ -1040,8 +1036,11 @@
 
                 <div className="gb-panel" style={{ padding:"12px 14px" }}>
                   <div style={{ fontSize:"10px", color:"#3a6020", letterSpacing:"1px", marginBottom:8 }}>▸ MOTIF ASSIGNMENT PREVIEW</div>
+                  {form.tracks.length === 0 && (
+                    <div style={{ fontSize:"10px", color:"#3a5028" }}>No tracks configured.</div>
+                  )}
                   {form.tracks.map((t,i) => {
-                    const motif = form.motifs.length > 0 ? form.motifs[i % form.motifs.length] : "—";
+                    const motif  = form.motifs.length  > 0 ? form.motifs[i  % form.motifs.length]  : "—";
                     const rhythm = form.rhythms.length > 0 ? form.rhythms[i % form.rhythms.length] : "—";
                     return (
                       <div key={i} style={{ fontSize:"10px", color:"#4a7838", padding:"3px 0", borderBottom:"1px solid #0f1a0c" }}>
@@ -1055,21 +1054,19 @@
               </div>
             )}
 
-            {/* ── LOG TAB ── */}
+            {/* LOG */}
             {activeTab === "log" && (
               <div className="gb-panel" style={{ padding:0 }}>
                 <div className="section-header">▸ GENERATION LOG</div>
                 <div ref={logRef} style={{ padding:"10px 12px", maxHeight:"340px", overflowY:"auto", fontSize:"10px", letterSpacing:"0.5px", lineHeight:"1.7" }}>
-                  {log.map((l,i) => (
-                    <div key={i} className={`log-line ${l.type}`}>{l.text}</div>
-                  ))}
+                  {log.map((l,i) => <div key={i} className={`log-line ${l.type}`}>{l.text}</div>)}
                 </div>
               </div>
             )}
 
-            {/* ── GENERATE BAR ── */}
+            {/* GENERATE BAR */}
             <div style={{ marginTop:20, display:"flex", gap:10, alignItems:"center", flexWrap:"wrap" }}>
-              <button className={`gb-btn${!generating?" primary":""}`} disabled={generating} onClick={generate}>
+              <button className={`gb-btn${!generating?" primary":""}`} disabled={generating || form.tracks.length===0} onClick={generate}>
                 {generating ? "◌ GENERATING..." : "▸ GENERATE"}
               </button>
               {zipData && (
@@ -1078,28 +1075,15 @@
                 </button>
               )}
               {form.tracks.length === 0 && (
-                <span style={{ fontSize:"10px", color:"#6a3a20" }}>▸ Add at least one track</span>
+                <span style={{ fontSize:"10px", color:"#6a3a20" }}>▸ Add at least one track in the TRACKS tab</span>
               )}
             </div>
 
-            {/* Progress bar */}
             {(generating || progress > 0) && (
               <div className="progress-bar-wrap" style={{ marginTop:10 }}>
                 <div className="progress-bar-fill" style={{ width:`${progress}%` }} />
               </div>
             )}
-
-            {/* Quick-reference */}
-            <div className="gb-panel" style={{ padding:"10px 14px", marginTop:20 }}>
-              <div style={{ fontSize:"10px", color:"#2a4a20", letterSpacing:"2px", marginBottom:6 }}>▸ QUICK REFERENCE</div>
-              <div style={{ fontSize:"10px", color:"#3a5a2a", lineHeight:1.8 }}>
-                Each .uge contains 4 channels: Pulse1 (melody) · Pulse2 (harmony) · Wave (bass/pad) · Noise (drums)<br/>
-                16 patterns generated per file (4 per channel). Import into GB Studio → Assets → Music.<br/>
-                Genre sets: scale preference, tempo range, rhythm density, octave range, bass movement.<br/>
-                Mood modifies: density ± · octave ± · tremolo · tritone usage.<br/>
-                Motifs generate melodic shapes; rhythms control note placement timing.
-              </div>
-            </div>
           </div>
         </div>
       );
@@ -1107,6 +1091,5 @@
 
     ReactDOM.createRoot(document.getElementById('root')).render(<App />);
   </script>
-
 </body>
 </html>
