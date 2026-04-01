@@ -490,46 +490,44 @@
 
     class UGEWriter {
       constructor() { this.buf = []; }
-
+    
       u8(v)    { this.buf.push((v >>> 0) & 0xFF); }
       u16le(v) { this.u8(v); this.u8(v >>> 8); }
       u32le(v) { this.u16le(v); this.u16le(v >>> 16); }
-
+    
       strN(s, n) {
         const enc = new TextEncoder().encode((s || "").slice(0, n));
         for (let i = 0; i < n; i++) this.u8(i < enc.length ? enc[i] : 0);
       }
-
-      // Write one instrument slot (8 bytes, fixed)
-      writePulseInstrument(duty, vol, envDir, envPace, sweepPace=0, sweepDirShift=0) {
-        this.u8(1);           // type = pulse
-        this.u8(0);           // length = infinite
-        this.u8(duty & 3);    // duty cycle 0-3
-        this.u8(vol & 0xF);   // initial volume 0-15
-        this.u8(envDir & 1);  // envelope direction
-        this.u8(envPace & 7); // envelope pace
-        this.u8(sweepPace & 7);
-        this.u8(sweepDirShift & 0xFF);
+    
+      // Duty instrument: 8 bytes, NO type prefix
+      writePulseInstrument(duty, vol, envDir, envPace, sweepTime=0, sweepDir=0, sweepShift=0) {
+        this.u8(0);              // length (0 = no length constraint)
+        this.u8(duty & 3);       // duty cycle 0-3
+        this.u8(vol & 0xF);      // initial volume 0-15
+        this.u8(envDir & 1);     // envelope direction
+        this.u8(envPace & 7);    // envelope pace
+        this.u8(sweepTime & 7);  // sweep time/pace
+        this.u8(sweepDir & 1);   // sweep direction
+        this.u8(sweepShift & 7); // sweep shift
       }
-
+    
+      // Wave instrument: 3 bytes, NO type prefix, NO padding
       writeWaveInstrument(outputLevel, waveId) {
-        this.u8(2);                 // type = wave
-        this.u8(0);                 // length = infinite
+        this.u8(0);                 // length (0 = infinite)
         this.u8(outputLevel & 3);   // output level: 0=mute,1=100%,2=50%,3=25%
         this.u8(waveId & 0xF);      // wave table index 0-15
-        this.u8(0); this.u8(0); this.u8(0); this.u8(0); // pad to 8 bytes
       }
-
+    
+      // Noise instrument: 5 bytes, NO type prefix, NO padding
       writeNoiseInstrument(vol, envDir, envPace, lfsrWidth) {
-        this.u8(3);              // type = noise
-        this.u8(0);              // length = infinite
+        this.u8(0);              // length (0 = infinite)
         this.u8(vol & 0xF);      // initial volume
         this.u8(envDir & 1);     // envelope direction
         this.u8(envPace & 7);    // envelope pace
         this.u8(lfsrWidth & 1);  // LFSR width: 0=15bit, 1=7bit
-        this.u8(0); this.u8(0);  // pad to 8 bytes
       }
-
+    
       // Write a 64-row pattern (320 bytes)
       writePattern(rows) {
         for (let r = 0; r < 64; r++) {
@@ -541,15 +539,23 @@
           this.u8(row.param      & 0xFF);
         }
       }
-
-      // Write song order for one channel: length byte + indices + padding to 256 total bytes
+    
+      // Write pattern count (u16le) then all patterns
+      writePatterns(patternList) {
+        this.u16le(patternList.length);   // ← REQUIRED count header
+        for (const rows of patternList) {
+          this.writePattern(rows);
+        }
+      }
+    
+      // Write song order for one channel: u8 count + count bytes (NO padding)
       writeOrder(patternIds) {
-        const len = Math.min(patternIds.length, 256);
+        const len = Math.min(patternIds.length, 255);
         this.u8(len);
         for (let i = 0; i < len; i++) this.u8(patternIds[i] & 0xFF);
-        for (let i = len; i < 256; i++) this.u8(0); // pad remainder
+        // NO padding — the format is variable-length
       }
-
+    
       toUint8Array() { return new Uint8Array(this.buf); }
     }
 
@@ -645,6 +651,7 @@
       //   CH4 (noise/drums):    patterns 12-15
       const scaleObj = { root: key, name: scaleName };
       const numPhrases = 4;
+      const allPatterns = [];
 
       for (let patIdx = 0; patIdx < 16; patIdx++) {
         const ch     = Math.floor(patIdx / numPhrases); // 0-3
@@ -676,9 +683,9 @@
               note: r.note > 3 ? r.note - 3 : r.note > 0 ? r.note : 0,
             }));
           }
+        allPatterns.push(rows);
         }
-
-        w.writePattern(rows);
+        w.writePatterns(allPatterns);
       }
 
       // ── Song Orders (4 channels) ─────────────────────────────
