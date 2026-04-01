@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>GBMusicGen ▸ UGE v6</title>
+  <meta name="description" content="AI-powered Game Boy chiptune composer. Generates .uge files for GB Studio." />
+  <meta name="theme-color" content="#0a0a0a" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="GBMusicGen" />
+  <link rel="manifest" id="manifest-placeholder" />
+
+  <script>
+    // Inline PWA manifest via blob URL
+    const manifest = {
+      name: "GBMusicGen",
+      short_name: "GBMusicGen",
+      description: "AI Game Boy chiptune composer for GB Studio",
+      start_url: ".",
+      display: "standalone",
+      background_color: "#0a0a0a",
+      theme_color: "#0a0a0a",
+      icons: [
+        {
+          src: "data:image/svg+xml," + encodeURIComponent(`<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'><rect width='192' height='192' fill='%230a0a0a'/><text x='96' y='130' font-size='100' text-anchor='middle' fill='%237bcc5a'>▸</text></svg>`),
+          sizes: "192x192",
+          type: "image/svg+xml"
+        }
+      ]
+    };
+    const manifestBlob = new Blob([JSON.stringify(manifest)], { type: "application/manifest+json" });
+    document.getElementById("manifest-placeholder").href = URL.createObjectURL(manifestBlob);
+  </script>
+
+  <script>
+    if ('serviceWorker' in navigator) {
+      const swCode = `
+        const CACHE = 'gbmusicgen-v1';
+        self.addEventListener('install', e => {
+          e.waitUntil(caches.open(CACHE).then(c => c.add(self.location.pathname)));
+          self.skipWaiting();
+        });
+        self.addEventListener('activate', e => {
+          e.waitUntil(clients.claim());
+        });
+        self.addEventListener('fetch', e => {
+          e.respondWith(
+            caches.match(e.request).then(r => r || fetch(e.request))
+          );
+        });
+      `;
+      const swBlob = new Blob([swCode], { type: 'application/javascript' });
+      const swUrl = URL.createObjectURL(swBlob);
+      navigator.serviceWorker.register(swUrl, { scope: './' }).catch(() => {});
+    }
+  </script>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; background: #0a0a0a; font-family: 'Courier New', monospace; }
+    body { overflow-x: hidden; color: #e8e0c8; }
+
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: #0a0a0a; }
+    ::-webkit-scrollbar-thumb { background: #2a4a20; }
+
+    #install-banner {
+      display: none;
+      position: fixed;
+      bottom: 0; left: 0; right: 0;
+      background: #0d1a0d;
+      border-top: 1px solid #3a4a30;
+      padding: 12px 20px;
+      z-index: 100;
+      font-size: 11px;
+      color: #7bcc5a;
+      letter-spacing: 2px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    #install-banner button {
+      background: #7bcc5a;
+      border: none;
+      color: #0a0a0a;
+      font-size: 11px;
+      letter-spacing: 2px;
+      padding: 6px 16px;
+      cursor: pointer;
+      font-weight: bold;
+    }
+    #install-banner .dismiss {
+      background: transparent;
+      border: 1px solid #3a4a30;
+      color: #5a7a50;
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <div id="install-banner">
+    <span>▸ INSTALL GBMUSICGEN TO HOME SCREEN</span>
+    <div style="display:flex;gap:8px">
+      <button id="install-btn">INSTALL</button>
+      <button class="dismiss" id="dismiss-btn">✕</button>
+    </div>
+  </div>
+
+  <script>
+    let deferredPrompt = null;
+    const banner = document.getElementById('install-banner');
+    const installBtn = document.getElementById('install-btn');
+    const dismissBtn = document.getElementById('dismiss-btn');
+
+    window.addEventListener('beforeinstallprompt', (e) => {
+      e.preventDefault();
+      deferredPrompt = e;
+      banner.style.display = 'flex';
+    });
+    installBtn.addEventListener('click', async () => {
+      if (!deferredPrompt) return;
+      deferredPrompt.prompt();
+      const { outcome } = await deferredPrompt.userChoice;
+      deferredPrompt = null;
+      banner.style.display = 'none';
+    });
+    dismissBtn.addEventListener('click', () => {
+      banner.style.display = 'none';
+    });
+    window.addEventListener('appinstalled', () => {
+      banner.style.display = 'none';
+      deferredPrompt = null;
+    });
+  </script>
+
+  <script type="text/babel">
+    const { useState, useEffect, useRef, useCallback } = React;
+
+    const PIXEL_FONT = `'Courier New', 'Lucida Console', monospace`;
+    const TRACK_ROLES = ["Main Theme","Explore","Battle","Rest","Intro Jingle","Game Over","Victory","Boss","Cutscene","Credits"];
+
+    function App() {
+      const [form, setForm] = useState({ genre: "Horror", mood: "Eerie", key: "A", scale: "Minor", tempo:120, trackCount:3, tracks:[{name:"Main Theme", role:"Main Theme"},{name:"Explore", role:"Explore"},{name:"Game Over", role:"Game Over"}], motifs:["Descending arpeggio","Pedal tone"], textures:["Sparse","Driving beat"] });
+      const [log, setLog] = useState(["▶ Ready. Configure your soundtrack and press GENERATE."]);
+      const [zipData, setZipData] = useState(null);
+      const logRef = useRef(null);
+
+      const addLog = (msg) => setLog(prev => [...prev.slice(-40), msg]);
+      useEffect(() => { if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight; }, [log]);
+
+      return (
+        <div style={{ background: "#0a0a0a", minHeight:"100vh", fontFamily:PIXEL_FONT, paddingBottom:"60px" }}>
+          <div style={{ padding:"28px 32px 20px", borderBottom:"2px solid #3a3a2a", background:"linear-gradient(180deg, #0d1a0d 0%, #0a0a0a 100%)" }}>
+            <h1 style={{ fontSize:"28px", color:"#7bcc5a", margin:0 }}>GBMusicGen ▸ UGE v6</h1>
+            <span style={{ fontSize:"11px", color:"#5a7a50" }}>AI-powered chiptune composer for GB Studio</span>
+          </div>
+
+          <div style={{ padding:"28px 32px" }}>
+            <button onClick={() => alert("Generate logic not included in this snippet")} style={{ padding:"8px 16px", background:"#7bcc5a", border:"none", color:"#0a0a0a", cursor:"pointer" }}>GENERATE</button>
+            {zipData && <button onClick={() => {
+              const blob = new Blob([zipData], {type:"application/zip"});
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement("a");
+              a.href = url;
+              a.download = "gbmusic.zip";
+              a.click();
+              URL.revokeObjectURL(url);
+            }} style={{ padding:"8px 16px", marginLeft:"12px", background:"#7bcc5a", border:"none", color:"#0a0a0a", cursor:"pointer" }}>DOWNLOAD ZIP</button>}
+            <div ref={logRef} style={{ marginTop:"16px", maxHeight:"300px", overflowY:"auto", background:"#0d1a0d", padding:"12px", border:"1px solid #3a4a30", fontSize:"11px" }}>
+              {log.map((l,i) => <div key={i}>{l}</div>)}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>
